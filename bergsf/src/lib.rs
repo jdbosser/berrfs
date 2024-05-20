@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use pyo3::prelude::*;
 use itertools::{self, Itertools}; 
 
@@ -21,6 +23,10 @@ fn logsumexp(lognumbers: &[f64]) -> f64 {
     c + r
 }
 
+
+
+
+
 use statrs::{distribution::MultivariateNormal, statistics::{Distribution, MeanN, Statistics, VarianceN}};
 type LogWeight = f64;
 #[derive(Debug, Clone)]
@@ -42,6 +48,15 @@ impl GaussianMixture {
     fn log_weights(&self) -> Vec<f64> {
         self.0.iter().map(|(w, _)| *w).collect()
     }
+
+    fn lnmul(mut self, log_num: f64) -> Self {
+         
+        for (w, _) in self.0.iter_mut() {
+            *w = *w + log_num
+        }
+
+        self
+    }
 }
 
 use nalgebra::{DMatrix, DVector};
@@ -57,15 +72,15 @@ struct MeasurementModel {
     r: DMatrix<f64>,
 }
 
-trait PDF: Continuous<DVector<f64>, f64> + Distribution<DVector<f64>> {
+trait PDF<T>: Continuous<T, f64> {
 
 }
 
-impl<A: Continuous<DVector<f64>, f64> + Distribution<DVector<f64>>> PDF for A {}
+impl<A: for<'a> Continuous<&'a  DVector<f64>, f64>> PDF<&DVector<f64>> for A {}
 
 use statrs::distribution::Continuous; 
 #[derive(Debug, Clone)]
-struct Model<C: PDF> {
+struct Model<T, C: PDF<T>> {
     measurement: MeasurementModel, 
     motion: MotionModel,
     birth_model: GaussianMixture, 
@@ -74,16 +89,17 @@ struct Model<C: PDF> {
     ps: f64, // Survival probability 
     pb: f64, // Birth probability
     pd: f64, // Probability of detection
+    clutter_type: PhantomData<T>,         //
 }
 
 #[derive(Debug, Clone)]
-struct BerGSF<C: PDF> {
-    models: Model<C>, 
+struct BerGSF<T, C: PDF<T>> {
+    models: Model<T, C>, 
     q: f64, // Current estimate that the bernoulli cardinality is 1
     s: GaussianMixture, // Current estimate on where the component is
 }
 
-impl<C> BerGSF<C> {
+impl<T, C: PDF<T>> BerGSF<T, C> {
     pub fn predict_prob(&self) -> f64 {
         let (ps, pb) = (self.models.ps, self.models.pb); 
 
@@ -134,41 +150,93 @@ impl<C> BerGSF<C> {
         // Return a normalized prediction gmm, e.g. eq. (96)
         GaussianMixture(vec_gmmix).normalize() 
     }
-    
-    fn measurement_update(mut self, measurements: &[DVector<f64>], p_state: &GaussianMixture) -> Self {
+}
+impl<'b, C: for<'a> PDF<&'a DVector<f64>>>  BerGSF<&'b DVector<f64>, C>{
+    fn measurement_update(mut self, measurements: &[DVector<f64>]) -> Self {
         
-        let log_weights = p_state.log_weights(); 
+        let predicted_state = self.predict_state();
+        let log_weights = predicted_state.log_weights(); 
         let weights = log_weights.iter().map(|lw| lw.exp()).collect_vec(); 
-        let h = self.models.measurement.h; 
-        let r = self.models.measurement.r; 
+        let h = &self.models.measurement.h; 
+        let r = &self.models.measurement.r; 
         
-        let qzs: Vec<_> = p_state.0.iter().map(|(w, g)| {
 
-            let eta = (h * g.mean())
-                .data.as_vec().to_vec(); // (101)
-                                         
-            let s = (h * g.variance().unwrap() * h.transpose() + r)
-                .data.as_vec().to_vec(); // (102)
+        type DV = DVector<f64>; 
+        type Mat = DMatrix<f64>;
+        struct PerGauss {
+            eta: DV, 
+            s: Mat, 
+            q: MultivariateNormal, 
+            k: Mat, 
+        }
+        
 
-            MultivariateNormal::new(eta, s)
-                .expect("Measurement model non sym-pos-def matrix")
+
+        let precalced: Vec<PerGauss> = predicted_state.0.iter().map(|(w, g)| {
+
+            let eta = (h * g.mean().unwrap()); // (101)
+            let s = (h * g.variance().unwrap() * h.transpose() + r); // (102)
+                                                                     
+            let q = MultivariateNormal::new(eta.data.as_vec().to_vec(), (s).data.as_vec().to_vec())
+                .expect("Measurement model non sym-pos-def matrix"); 
+
+            let k = (g.variance().unwrap() * h.transpose()) * (&s).clone().try_inverse().expect("Unable to invert the S-matrix."); 
+
+            PerGauss{eta, s, q, k}
 
         }).collect(); 
 
         let ln_lambda = self.models.lambda.ln(); 
 
-        let c: PDF = self.models.clutter_distribution; 
+        let c: &C = &self.models.clutter_distribution; 
 
-        let delta_k = self.models.pd * (1. - measurements.iter().map(|z| {
+        let delta_k: f64 = self.models.pd * (1. - measurements.iter().map(|z| {
             
-            log_weights.iter().zip(qzs.iter())
+            log_weights.iter().zip(precalced.iter())
                 .map(|(lw, qz)| {
-                    (lw + qz.ln_pdf(z) - ln_lambda - c.ln_pdf(z)).exp()
-                }).sum()
+                    (lw + qz.q.ln_pdf(z) - ln_lambda - c.ln_pdf(z)).exp()
+                }).sum::<f64>()
 
-        }).sum() ); // (99)
+        }).sum::<f64>() ); // (99)
+        
+        let no_det = predicted_state.clone();
+
+        let det: Vec<_> = precalced.iter().zip(predicted_state.0.iter()).cartesian_product(measurements.iter())
+            .map(|((pc, pg), z)|{
+                
+                let pmean = pg.1.mean().unwrap(); 
+                let pcov = pg.1.variance().unwrap(); 
+                let old_weight = pg.0; 
+
+
+
+                let new_mean = pmean + &pc.k * (z - &pc.eta); // (103)
+                let new_cov = &pcov - &pc.k * h * pcov.transpose(); // (104)
+
+                let new_weight = old_weight + pc.q.ln_pdf(z) - self.models.lambda.ln() - c.ln_pdf(z); // (98)
+
+                (new_weight, MultivariateNormal::new(new_mean.data.as_vec().to_vec(), new_cov.data.as_vec().to_vec()).expect("Error in creating gaussian"))
+
+            }).collect(); 
+
+        let det = GaussianMixture(det);
+
+        let no_det = no_det.lnmul((1.0 - self.models.pd).ln() - (1.0 - delta_k).ln()); 
+        let det = det.lnmul(self.models.pd.ln() - (1.0 - delta_k).ln());
+
+        let new_s = GaussianMixture([no_det.0, det.0].concat());
+        
+        let pq = (&self).predict_prob();
+        let new_q = ((1.0 - delta_k).ln() + pq.ln() - (1.0 - pq * delta_k).ln()).exp();
+
+        self.s = new_s; 
+        self.q = new_q; 
         
 
+        self
+
+        
+        // Apply the weight modification in 
 
         /*|z: DVector<f64>| {
             p_state.0.iter().map(|(w, g)| {
@@ -177,6 +245,7 @@ impl<C> BerGSF<C> {
             }
         };*/
 
+        /*
         p_state.0.iter().map(|(w, g)| {
             let eta = h * g.mean(); // (101)
             let s = h * g.variance().unwrap() * h.transpose() + r; 
@@ -200,6 +269,7 @@ impl<C> BerGSF<C> {
         };
 
         self.models.pd * (1. - 1.) 
+        */
     }
 
 }

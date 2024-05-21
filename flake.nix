@@ -48,7 +48,8 @@
 	  lib-path = with pkgs; lib.makeLibraryPath [
 	    libffi
 	    openssl
-	    stdenv.cc.cc
+	    # glibc
+	    stdenv.cc
 	  ];
 
 	  createShellHook = python: ''
@@ -162,11 +163,11 @@
             };
 		
 		devShells.default = let 
-			pythonEnv = python.withPackages (p: [p.numpy]); 
+			pythonEnv = python.withPackages (p: [p.numpy p.matplotlib]); 
 			shell_hook = createShellHook pythonEnv; 
 		in 
 		pkgs.mkShell {
-			buildInputs = [pkgs.maturin python];
+			buildInputs = [pkgs.maturin python pkgs.glibc];
 			shellHook = shell_hook; 
 		};
 

@@ -1,3 +1,3 @@
 def a_fun(): 
 
-    print("hehe")
+    print("hehe2")

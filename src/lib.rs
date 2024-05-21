@@ -1,10 +1,11 @@
+use std::error::Error;
 use std::marker::PhantomData;
 
 use pyo3::prelude::*;
 use pyo3::types::PyList; 
 use itertools::{self, Itertools}; 
-use numpy::ndarray::{ArrayD, ArrayViewD, ArrayViewMutD};
-use numpy::{IntoPyArray, PyArrayDyn, PyReadonlyArray2, PyReadonlyArray1};
+use numpy::ndarray::{ArrayD, ArrayViewD, ArrayViewMutD, Array1};
+use numpy::{IntoPyArray, PyArray, PyArray1, PyArrayDyn, PyArrayMethods, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods};
 
 /// Formats the sum of two numbers as string.
 #[pyfunction]
@@ -54,11 +55,11 @@ type PyVec<'a> = PyReadonlyArray1<'a, f64>;
 #[pymethods]
 impl BerGSFPy {
     #[new]
-    fn new(f: PyMat, q: PyMat, h: PyMat, r: PyMat, birth_model: &PyList, lambda: f64, clutter_mean: PyVec, clutter_var: PyMat, ps: f64, pb: f64, pd: f64) -> Self {
+    fn new(f: PyMat, q: PyMat, h: PyMat, r: PyMat, birth_model: &PyList, llambda: f64, clutter_mean: PyVec, clutter_var: PyMat, ps: f64, pb: f64, pd: f64) -> Self {
         
         let dim_x = f.shape()[1];
         let dim_w = q.shape()[1];
-        let dim_y = h.shape()[1];
+        let dim_y = h.shape()[0];
         let dim_e = r.shape()[1];
 
         let f = f.to_vec().unwrap();
@@ -80,10 +81,10 @@ impl BerGSFPy {
                 q: DMatrix::from_vec(dim_w, dim_w, q),
             },
             measurement: MeasurementModel {
-                h: DMatrix::from_vec(dim_y, dim_y, h),
-                r: DMatrix::from_vec(dim_e, dim_e, r),
+                h: DMatrix::from_vec(dim_y, dim_x, h),
+                r: DMatrix::from_vec(dim_y, dim_y, r),
             },
-            lambda, 
+            lambda: llambda, 
             ps, pb, pd, 
             birth_model: GaussianMixture(gaussians).normalize(), 
             clutter_distribution: MultivariateNormal::new(clutter_mean.to_vec().unwrap(), clutter_var.to_vec().unwrap()).unwrap()
@@ -98,6 +99,48 @@ impl BerGSFPy {
             }
         }
     }
+
+    fn __repr__(slf: &Bound<'_, Self>) -> PyResult<String> {
+        // This is the equivalent of `self.__class__.__name__` in Python.
+        let class_name: String = slf.get_type().qualname()?;
+        // To access fields of the Rust struct, we need to borrow the `PyCell`.
+        let filter = &slf.borrow().filter; 
+        Ok(format!("{}(\n\tprob = {:#?},\n\t mixtures = {})", class_name, filter.q, filter.s.0.len()))
+    }
+
+    fn predict(mut slf: PyRefMut<Self>) -> PyRefMut<Self> {
+        slf.filter.q = slf.filter.predict_prob(); 
+        slf.filter.s = slf.filter.predict_state(); 
+        slf
+    }
+
+    fn update<'py>(mut slf: PyRefMut<'py, Self>, measurements: Vec<PyVec>) -> PyRefMut<'py, Self> {
+        
+        println!("{:#?}", measurements); 
+
+        // Convert the measurements to dvectors
+        let measurements = measurements.iter().map(|m| {
+            let m = m.to_vec().expect("could not extract data from numpy");
+            DVector::from_vec(m)
+        }).collect_vec();
+
+        slf.filter.measurement_update(&measurements);
+        slf
+
+    }
+
+    fn density<'py>(slf: PyRef<'py, Self>, x: Vec<PyVec<'py>>, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        
+        // Evaluate the density at the points of x
+        let x: Vec<DVector<f64>> = x.into_iter().map(|xx| {DVector::from_vec(xx.to_vec().expect("could not extract data from numpy"))}).collect();
+
+        let x = slf.filter.s.evaluate(&x);
+
+        x.into_pyarray_bound(py)
+
+    }
+
+
 }
 
 
@@ -130,6 +173,16 @@ impl GaussianMixture {
         }
 
         self
+    }
+
+    fn evaluate(&self, points: &[DVector<f64>]) -> Vec<f64> {
+        
+        points.iter().map(|x| {
+            self.0.iter().map(|(lnw, g)| {
+                g.pdf(x)*(lnw.exp())
+            }).sum()
+        }).collect()
+
     }
 }
 
@@ -219,13 +272,14 @@ impl<C: PDF> BerGSF<C> {
             }); 
 
         let vec_gmmix: Vec<_> = gm_birth.chain(gm_surv).collect(); 
+        //let vec_gmmix: Vec<_> = gm_birth.collect();
         
         // Return a normalized prediction gmm, e.g. eq. (96)
         GaussianMixture(vec_gmmix).normalize() 
     }
 }
 impl<C: PDF>  BerGSF<C>{
-    fn measurement_update(mut self, measurements: &[DVector<f64>]) -> Self {
+    fn measurement_update(&mut self, measurements: &[DVector<f64>]) -> &Self {
         
         let predicted_state = self.predict_state();
         let log_weights = predicted_state.log_weights(); 
@@ -307,42 +361,5 @@ impl<C: PDF>  BerGSF<C>{
         
 
         self
-
-        
-        // Apply the weight modification in 
-
-        /*|z: DVector<f64>| {
-            p_state.0.iter().map(|(w, g)| {
-                let eta = h * g.mean(); // (101)
-                let s = h * g.variance().unwrap() * h.transpose() + r; 
-            }
-        };*/
-
-        /*
-        p_state.0.iter().map(|(w, g)| {
-            let eta = h * g.mean(); // (101)
-            let s = h * g.variance().unwrap() * h.transpose() + r; 
-        
-            
-
-        });
-
-
-        let f = |z: DVector<f64>| {
-            
-            p_state.0.iter().map(|(w, g)|{
-                let eta = h * g.mean(); // (101)
-                let s = h * g.variance().unwrap() * h.transpose() + r; 
-
-            } )
-                
-            
-
-
-        };
-
-        self.models.pd * (1. - 1.) 
-        */
     }
-
 }

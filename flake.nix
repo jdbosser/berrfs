@@ -9,6 +9,10 @@
     berpf.url = "github:jdbosser/berpf";
     mcsim.url = "github:jdbosser/mcsim";
     anim.url = "github:jdbosser/render-anim";
+    crane = {
+      url = "github:ipetkov/crane";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
 
     filtc.inputs.nixpkgs.follows = "nixpkgs";
     berpf.inputs.nixpkgs.follows = "nixpkgs";
@@ -17,7 +21,7 @@
   };
 
 
-  outputs = { self, nixpkgs, flakeutils, filtc, berpf, mcsim, anim}: 
+  outputs = { self, nixpkgs, flakeutils, filtc, berpf, mcsim, anim, crane}: 
     flakeutils.lib.eachDefaultSystem (system:
         let pkgs = nixpkgs.legacyPackages.${system}; 
 
@@ -27,7 +31,48 @@
 
         pfiltc = filtc.buildPythonPackage python;
         
+        customRustToolchain = pkgs.rust-bin.stable."1.70.0".default;
+        craneLib =
+          (crane.mkLib pkgs).overrideToolchain customRustToolchain;
+        projectName =
+          (craneLib.crateNameFromCargoToml { cargoToml = ./Cargo.toml; }).pname;
 
+        projectVersion = (craneLib.crateNameFromCargoToml {
+          cargoToml = ./Cargo.toml;
+        }).version;
+
+        crateCfg = {
+          src = craneLib.cleanCargoSource (craneLib.path ./.);
+          nativeBuildInputs = [ python ];
+        };
+
+        wheelTail =
+          "cp310-cp310-manylinux_2_34_x86_64"; # Change if pythonVersion changes
+        wheelName = "${projectName}-${projectVersion}-${wheelTail}.whl";
+
+        # Build the library, then re-use the target dir to generate the wheel file with maturin
+        crateWheel = (craneLib.buildPackage (crateCfg // {
+          pname = projectName;
+          version = projectVersion;
+          # cargoArtifacts = crateArtifacts;
+        })).overrideAttrs (old: {
+          nativeBuildInputs = old.nativeBuildInputs ++ [ pkgs.maturin ];
+          buildPhase = old.buildPhase + ''
+            maturin build --offline --target-dir ./target
+          '';
+          installPhase = old.installPhase + ''
+            cp target/wheels/${wheelName} $out/
+          '';
+        });
+        pythonPackage = ps:
+            ps.buildPythonPackage rec {
+              pname = projectName;
+              format = "wheel";
+              version = projectVersion;
+              src = "${crateWheel}/${wheelName}";
+              doCheck = false;
+              pythonImportsCheck = [ projectName ];
+            };
         in
         
         # Some python packages have dependencies that 
@@ -52,6 +97,7 @@
                         p.joblib
                         p.numba
                         pfiltc 
+			pythonPackage
 
 
                         # p.pyqt5

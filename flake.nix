@@ -45,6 +45,26 @@
           nativeBuildInputs = [ python pkgs.rustc ];
         };
 
+	  lib-path = with pkgs; lib.makeLibraryPath [
+	    libffi
+	    openssl
+	    stdenv.cc.cc
+	  ];
+
+	  createShellHook = python: ''
+		    SOURCE_DATE_EPOCH=$(date +%s)
+		    export "LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${lib-path}"
+		    VENV=.venv
+
+		    if test ! -d $VENV; then
+		      python3.10 -m venv $VENV
+		    fi
+		    source ./$VENV/bin/activate
+		    export PYTHONPATH=`pwd`/$VENV/${python.sitePackages}/:$PYTHONPATH
+		    ln -sf ${python}/lib/python3.10/site-packages/* ./.venv/lib/python3.10/site-packages
+		    #pip install -r requirements.txt
+		  '';
+
         wheelTail =
           "cp310-cp310-manylinux_2_34_x86_64"; # Change if pythonVersion changes
         wheelName = "${projectName}-${projectVersion}-${wheelTail}.whl";
@@ -95,7 +115,7 @@
 
 	    
           pythonEnv = (python.withPackages
-            (ps: [ (pythonPackage ps) ] ++ (with ps; [ ipython ])));
+            (ps: [ (pythonPackage ps) ] ++ (with ps; [ numpy virtualenv venvShellHook ])));
         in
         
         # Some python packages have dependencies that 
@@ -103,7 +123,7 @@
         # we have this if case here. We have no results
         # in this flake for such systems. 
         if !(pkgs.lib.hasInfix "i686" system) then {
-            devShells.default =  pkgs.mkShell {
+            devShells.old =  pkgs.mkShell {
                   buildInputs = [
                     (python.withPackages (p: [
                         p.numpy 
@@ -140,8 +160,31 @@
                   ];
                 QT_QPA_PLATFORM_PLUGIN_PATH="${pkgs.qt5.qtbase.bin}/lib/qt-${pkgs.qt5.qtbase.version}/plugins";
             };
+		
+		devShells.default = let 
+			pythonEnv = python.withPackages (p: [p.numpy]); 
+			shell_hook = createShellHook pythonEnv; 
+		in 
+		pkgs.mkShell {
+			buildInputs = [pkgs.maturin python];
+			shellHook = shell_hook; 
+		};
+
 	    devShells.python = pkgs.mkShell {
-		buildInputs = [pythonEnv];
+		buildInputs = [pythonEnv pkgs.maturin];
+		  shellHook = ''
+		    SOURCE_DATE_EPOCH=$(date +%s)
+		    export "LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${lib-path}"
+		    VENV=.venv
+
+		    if test ! -d $VENV; then
+		      python3.10 -m venv $VENV
+		    fi
+		    source ./$VENV/bin/activate
+		    export PYTHONPATH=`pwd`/$VENV/${python.sitePackages}/:$PYTHONPATH
+		    ln -sf ${pythonEnv}/lib/python3.10/site-packages/* ./.venv/lib/python3.10/site-packages
+		    #pip install -r requirements.txt
+		  '';
 	    };
 
 	    apps = {

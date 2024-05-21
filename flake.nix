@@ -3,7 +3,7 @@
 
     
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-23.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-23.11";
     flakeutils.url = "github:numtide/flake-utils";
     filtc.url = "github:jdbosser/filtc";
     berpf.url = "github:jdbosser/berpf";
@@ -31,9 +31,8 @@
 
         pfiltc = filtc.buildPythonPackage python;
         
-        customRustToolchain = pkgs.rust-bin.stable."1.70.0".default;
-        craneLib =
-          (crane.mkLib pkgs).overrideToolchain customRustToolchain;
+        # customRustToolchain = pkgs.rust-bin.stable."1.70.0".default;
+        craneLib = (crane.mkLib pkgs); #.overrideToolchain customRustToolchain;
         projectName =
           (craneLib.crateNameFromCargoToml { cargoToml = ./Cargo.toml; }).pname;
 
@@ -43,7 +42,7 @@
 
         crateCfg = {
           src = craneLib.cleanCargoSource (craneLib.path ./.);
-          nativeBuildInputs = [ python ];
+          nativeBuildInputs = [ python pkgs.rustc ];
         };
 
         wheelTail =
@@ -60,12 +59,32 @@
           buildPhase = old.buildPhase + ''
             maturin build --offline --target-dir ./target
           '';
+          #cp target/wheels/${wheelName} $out/
           installPhase = old.installPhase + ''
-            cp target/wheels/${wheelName} $out/
+	  	cp -r target $out/
           '';
         });
         pythonPackage = ps:
             ps.buildPythonPackage rec {
+              pname = projectName;
+              format = "pyproject";
+              version = projectVersion;
+	      cargoDeps = pkgs.rustPlatform.importCargoLock {
+    		lockFile = ./Cargo.lock;
+  		};
+	      # build-system = [pgs.maturin];
+	      propagetedBuildInputs = [pkgs.maturin];
+		 nativeBuildInputs = with pkgs.rustPlatform; [
+		    cargoSetupHook
+		    maturinBuildHook
+		  ];
+              #src = "${crateWheel}/${wheelName}";
+              src = ./.;
+              doCheck = false;
+              pythonImportsCheck = [ projectName ];
+            };
+        pythonApp = ps:
+            ps.buildPythonApplication rec {
               pname = projectName;
               format = "wheel";
               version = projectVersion;
@@ -73,6 +92,10 @@
               doCheck = false;
               pythonImportsCheck = [ projectName ];
             };
+
+	    
+          pythonEnv = (python.withPackages
+            (ps: [ (pythonPackage ps) ] ++ (with ps; [ ipython ])));
         in
         
         # Some python packages have dependencies that 
@@ -96,7 +119,6 @@
                         p.tkinter
                         p.joblib
                         p.numba
-                        pfiltc 
 			pythonPackage
 
 
@@ -118,6 +140,16 @@
                   ];
                 QT_QPA_PLATFORM_PLUGIN_PATH="${pkgs.qt5.qtbase.bin}/lib/qt-${pkgs.qt5.qtbase.version}/plugins";
             };
+	    devShells.python = pkgs.mkShell {
+		buildInputs = [pythonEnv];
+	    };
+
+	    apps = {
+		default = {
+		    type = "app";
+		    program = "${pythonEnv}/bin/python";
+		};
+	    };
 
         } else {}
     );

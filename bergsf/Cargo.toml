@@ -16,5 +16,5 @@ faer-ext = "*"
 statrs = "*"
 nalgebra = "*"
 itertools = "*"
-num_traits = "*"
+num-traits = "*"
 

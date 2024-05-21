@@ -1,7 +1,10 @@
 use std::marker::PhantomData;
 
 use pyo3::prelude::*;
+use pyo3::types::PyList; 
 use itertools::{self, Itertools}; 
+use numpy::ndarray::{ArrayD, ArrayViewD, ArrayViewMutD};
+use numpy::{IntoPyArray, PyArrayDyn, PyReadonlyArray2, PyReadonlyArray1};
 
 /// Formats the sum of two numbers as string.
 #[pyfunction]
@@ -13,6 +16,8 @@ fn sum_as_string(a: usize, b: usize) -> PyResult<String> {
 #[pymodule]
 fn bergsf(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sum_as_string, m)?)?;
+    m.add_class::<Number>()?; 
+    m.add_class::<BerGSFPy>()?; 
     Ok(())
 }
 
@@ -24,10 +29,79 @@ fn logsumexp(lognumbers: &[f64]) -> f64 {
 }
 
 
+    // A "tuple" struct
+#[pyclass]
+struct Number(i32);
+
+#[pymethods]
+impl Number {
+    #[new]
+    fn new(value: i32) -> Self {
+        Number(value)
+    }
+}
 
 
+type Instance = BerGSF<MultivariateNormal>;
+#[pyclass(name = "BerGSF")]
+struct BerGSFPy {
+    filter: BerGSF<MultivariateNormal> 
+}
 
-use statrs::{distribution::MultivariateNormal, statistics::{Distribution, MeanN, Statistics, VarianceN}};
+
+type PyMat<'a> = PyReadonlyArray2<'a, f64>; 
+type PyVec<'a> = PyReadonlyArray1<'a, f64>; 
+#[pymethods]
+impl BerGSFPy {
+    #[new]
+    fn new(f: PyMat, q: PyMat, h: PyMat, r: PyMat, birth_model: &PyList, lambda: f64, clutter_mean: PyVec, clutter_var: PyMat, ps: f64, pb: f64, pd: f64) -> Self {
+        
+        let dim_x = f.shape()[1];
+        let dim_w = q.shape()[1];
+        let dim_y = h.shape()[1];
+        let dim_e = r.shape()[1];
+
+        let f = f.to_vec().unwrap();
+        let q = q.to_vec().unwrap();
+        let h = h.to_vec().unwrap();
+        let r = r.to_vec().unwrap();
+
+        let gaussians: Vec<(LogWeight, MultivariateNormal)> = birth_model.iter().map(|bm| {
+            let mean: PyVec = bm.getattr("mean").unwrap().extract().unwrap();
+            let cov: PyMat = bm.getattr("cov").unwrap().extract().unwrap();
+            let weight: f64 = bm.getattr("weight").unwrap().extract().unwrap();
+
+            (weight.ln(), MultivariateNormal::new(mean.to_vec().unwrap(), cov.to_vec().unwrap()).unwrap())
+        }).collect(); 
+        
+        let model = Model {
+            motion: MotionModel {
+                f: DMatrix::from_vec(dim_x, dim_x, f),
+                q: DMatrix::from_vec(dim_w, dim_w, q),
+            },
+            measurement: MeasurementModel {
+                h: DMatrix::from_vec(dim_y, dim_y, h),
+                r: DMatrix::from_vec(dim_e, dim_e, r),
+            },
+            lambda, 
+            ps, pb, pd, 
+            birth_model: GaussianMixture(gaussians).normalize(), 
+            clutter_distribution: MultivariateNormal::new(clutter_mean.to_vec().unwrap(), clutter_var.to_vec().unwrap()).unwrap()
+        };
+
+        
+        BerGSFPy {
+            filter: BerGSF{
+                s: model.birth_model.clone(), 
+                models: model, 
+                q: 0.
+            }
+        }
+    }
+}
+
+
+use statrs::{distribution::{MultivariateNormal, Uniform}, statistics::{Distribution, MeanN, Statistics, VarianceN}};
 type LogWeight = f64;
 #[derive(Debug, Clone)]
 struct GaussianMixture(Vec<(LogWeight, MultivariateNormal)>);
@@ -72,15 +146,15 @@ struct MeasurementModel {
     r: DMatrix<f64>,
 }
 
-trait PDF<T>: Continuous<T, f64> {
+trait PDF: for<'a> Continuous<&'a DVector<f64>, f64> {
 
 }
 
-impl<A: for<'a> Continuous<&'a  DVector<f64>, f64>> PDF<&DVector<f64>> for A {}
+impl<A: for<'a> Continuous<&'a  DVector<f64>, f64>> PDF for A {}
 
 use statrs::distribution::Continuous; 
 #[derive(Debug, Clone)]
-struct Model<T, C: PDF<T>> {
+struct Model<C: PDF> {
     measurement: MeasurementModel, 
     motion: MotionModel,
     birth_model: GaussianMixture, 
@@ -89,17 +163,16 @@ struct Model<T, C: PDF<T>> {
     ps: f64, // Survival probability 
     pb: f64, // Birth probability
     pd: f64, // Probability of detection
-    clutter_type: PhantomData<T>,         //
 }
 
 #[derive(Debug, Clone)]
-struct BerGSF<T, C: PDF<T>> {
-    models: Model<T, C>, 
+struct BerGSF<C: PDF> {
+    models: Model<C>, 
     q: f64, // Current estimate that the bernoulli cardinality is 1
     s: GaussianMixture, // Current estimate on where the component is
 }
 
-impl<T, C: PDF<T>> BerGSF<T, C> {
+impl<C: PDF> BerGSF<C> {
     pub fn predict_prob(&self) -> f64 {
         let (ps, pb) = (self.models.ps, self.models.pb); 
 
@@ -151,7 +224,7 @@ impl<T, C: PDF<T>> BerGSF<T, C> {
         GaussianMixture(vec_gmmix).normalize() 
     }
 }
-impl<'b, C: for<'a> PDF<&'a DVector<f64>>>  BerGSF<&'b DVector<f64>, C>{
+impl<C: PDF>  BerGSF<C>{
     fn measurement_update(mut self, measurements: &[DVector<f64>]) -> Self {
         
         let predicted_state = self.predict_state();

@@ -189,7 +189,6 @@
 	    };
 
 	    packages.default = (pkgs.python3Packages.callPackage ./pack.nix {}); 
-	    buildPythonPackage = (python: python.pkgs.callPackage ./pack.nix {});
 	
 	    apps = {
 		default = {
@@ -200,5 +199,7 @@
 
 
         } else {}
-    );
+    ) // {
+	    buildPythonPackage = (python: python.pkgs.callPackage ./pack.nix {});
+    };
 }

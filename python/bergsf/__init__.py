@@ -56,6 +56,8 @@ def example_setup_uc():
     b = BerGSFUniformClutter(f, q, h, r, birth_model, llambda, [(-2, 2)], ps, pb, pd)
     return b
 
+example_setup = example_setup_uc
+
 __doc__ = bergsf.__doc__
 if hasattr(bergsf, "__all__"):
     __all__ = bergsf.__all__

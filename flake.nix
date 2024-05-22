@@ -3,7 +3,7 @@
 
     
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-23.11";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-23.05";
     flakeutils.url = "github:numtide/flake-utils";
     filtc.url = "github:jdbosser/filtc";
     berpf.url = "github:jdbosser/berpf";
@@ -188,12 +188,16 @@
 		  '';
 	    };
 
+	    packages.default = (pkgs.python3Packages.callPackage ./pack.nix {}); 
+	    buildPythonPackage = (python: python.pkgs.callPackage ./pack.nix {});
+	
 	    apps = {
 		default = {
 		    type = "app";
 		    program = "${pythonEnv}/bin/python";
 		};
 	    };
+
 
         } else {}
     );

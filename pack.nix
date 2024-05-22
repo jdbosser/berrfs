@@ -9,7 +9,8 @@ buildPythonPackage rec {
 	};
 	# build-system = [pgs.maturin];
 	propagetedBuildInputs = [maturin numpy matplotlib];
-	 nativeBuildInputs = with rustPlatform; [
+	dependencies = [numpy matplotlib];
+	nativeBuildInputs = with rustPlatform; [
 	    cargoSetupHook
 	    maturinBuildHook
 	  ];

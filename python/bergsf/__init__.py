@@ -13,24 +13,22 @@ class GaussianComponent:
 def example_setup():
 
     
-    f = np.eye(2)
-    q = np.eye(2)
-    h = np.array([[1., 0.]])
+    f = 2 * np.eye(1)
+    q = 1 * np.eye(1)
+    h = np.array([[1.]])
     r = np.eye(1)
 
     pb = 0.01
     ps = 0.99
     pd = 0.6
     
-    birth_model = [GaussianComponent(1.0, np.zeros(2), np.eye(2))]
+    birth_model = [GaussianComponent(1.0, np.zeros(1), np.eye(1))]
     clutter_mean = np.zeros(1)
     clutter_var = np.eye(1)
     llambda = 2
     
     b = BerGSF(f, q, h, r, birth_model, llambda, clutter_mean, clutter_var, ps, pb, pd)
-    print(b)
     return b
-
 
 __doc__ = bergsf.__doc__
 if hasattr(bergsf, "__all__"):

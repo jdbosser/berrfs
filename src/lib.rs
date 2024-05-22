@@ -140,6 +140,22 @@ impl BerGSFPy {
 
     }
 
+    fn density_gaussians<'py>(slf: PyRef<'py, Self>, x: Vec<PyVec<'py>>, py: Python<'py>) -> Vec<Bound<'py, PyArray1<f64>>> {
+        
+        let data: Vec<_> = slf.filter.s.0.iter().map(|(lnw, g)| {
+            
+            let v: Vec<f64> = x.iter().map(|xx| {
+                g.pdf(&DVector::from_vec(xx.to_vec().expect("cannot extract numpy data"))) * lnw.exp()
+            }).collect();
+            
+           v.into_pyarray_bound(py) 
+
+        }).collect();
+        
+        data
+
+    }
+
 
 }
 

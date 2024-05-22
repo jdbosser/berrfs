@@ -1,19 +1,19 @@
 
-from bergsf import example_setup
+from bergsf import example_setup_gc, example_setup_uc
 import matplotlib.pyplot as plt
 import numpy as np
 
 def main(): 
 
-    b: BerGSF = example_setup()
+    b = example_setup_uc()
     
     x = np.linspace(-6, 6, 1000)
     x = [np.array([xx]) for xx in x]
     
     # b.update([np.array([1.])])
-    #b.update([np.array([1.])])
-    b.predict()
-    b.predict()
+
+    for _ in range(10): 
+        b.update([])
     
     gaussians = b.density_gaussians(x)
     

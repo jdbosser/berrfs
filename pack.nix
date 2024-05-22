@@ -13,6 +13,8 @@ buildPythonPackage rec {
 	nativeBuildInputs = with rustPlatform; [
 	    cargoSetupHook
 	    maturinBuildHook
+	    numpy 
+	    matplotlib
 	  ];
 	#src = "${crateWheel}/${wheelName}";
 	src = ./.;

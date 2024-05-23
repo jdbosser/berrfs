@@ -122,4 +122,8 @@ impl PyBerGSFUniformClutter {
         data
 
     }
+
+    fn prob(&self) -> f64 {
+        self.filter.q
+    }
 }

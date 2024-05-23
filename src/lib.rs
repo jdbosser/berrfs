@@ -231,8 +231,13 @@ impl<C: PDF>  BerGSF<C>{
     fn measurement_update(&mut self, measurements: &[DVector<f64>]) -> &Self {
         
         let predicted_state = self.predict_state();
+        
+        println!("ok1");
+
         let log_weights = predicted_state.log_weights(); 
+        println!("ok2");
         let weights = log_weights.iter().map(|lw| lw.exp()).collect_vec(); 
+        println!("ok3");
         let h = &self.models.measurement.h; 
         let r = &self.models.measurement.r; 
         
@@ -250,14 +255,19 @@ impl<C: PDF>  BerGSF<C>{
 
         let precalced: Vec<PerGauss> = predicted_state.0.iter().map(|(w, g)| {
 
+            println!("ok4");
             let eta = (h * g.mean().unwrap()); // (101)
+            println!("ok5");
             let s = (h * g.variance().unwrap() * h.transpose() + r); // (102)
-                                                                     
+                                                                      
+            println!("ok6");
             let q = MultivariateNormal::new(eta.data.as_vec().to_vec(), (s).data.as_vec().to_vec())
                 .expect("Measurement model non sym-pos-def matrix"); 
 
+            println!("ok7");
             let k = (g.variance().unwrap() * h.transpose()) * (&s).clone().try_inverse().expect("Unable to invert the S-matrix."); 
 
+            println!("ok8");
             PerGauss{eta, s, q, k}
 
         }).collect(); 
@@ -274,7 +284,8 @@ impl<C: PDF>  BerGSF<C>{
                 }).sum::<f64>()
 
         }).sum::<f64>() ); // (99)
-        
+         
+        println!("ok9");
         let no_det = predicted_state.clone();
 
         let det: Vec<_> = precalced.iter().zip(predicted_state.0.iter()).cartesian_product(measurements.iter())
@@ -286,9 +297,12 @@ impl<C: PDF>  BerGSF<C>{
 
 
 
+                println!("ok10");
                 let new_mean = pmean + &pc.k * (z - &pc.eta); // (103)
+                                                              //
                 let new_cov = &pcov - &pc.k * h * pcov.transpose(); // (104)
 
+                println!("ok11");
                 let new_weight = old_weight + pc.q.ln_pdf(z) - self.models.lambda.ln() - c.ln_pdf(z); // (98)
 
                 (new_weight, MultivariateNormal::new(new_mean.data.as_vec().to_vec(), new_cov.data.as_vec().to_vec()).expect("Error in creating gaussian"))

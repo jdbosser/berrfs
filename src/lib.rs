@@ -310,6 +310,9 @@ impl<C: PDF>  BerGSF<C>{
                 let new_mean = pmean + &pc.k * (z - &pc.eta); // (103)
                                                               //
                 let new_cov = &pcov - &pc.k * h * pcov.transpose(); // (104)
+                
+                // Ensure that it is symmetric
+                let new_cov = 1. / 2. * (new_cov.clone() + new_cov.transpose());
 
                 println!("ok11");
                 let new_weight = old_weight + pc.q.ln_pdf(z) - self.models.lambda.ln() - c.ln_pdf(z); // (98)

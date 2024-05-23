@@ -220,9 +220,17 @@ impl<C: PDF> BerGSF<C> {
                 (w + mul_surv.ln(), p_g)
             }); 
 
-        let vec_gmmix: Vec<_> = gm_birth.chain(gm_surv).collect(); 
+        let mut vec_gmmix: Vec<(LogWeight, MultivariateNormal)> = gm_birth.chain(gm_surv).collect(); 
         //let vec_gmmix: Vec<_> = gm_birth.collect();
         
+        vec_gmmix.sort_by(|a, b| {
+            // This will yield a descending order.
+            b.0.total_cmp(&a.0)
+        });
+
+        // Take the 2000 first elements
+        vec_gmmix.truncate(2000);
+
         // Return a normalized prediction gmm, e.g. eq. (96)
         GaussianMixture(vec_gmmix).normalize() 
     }
@@ -230,6 +238,7 @@ impl<C: PDF> BerGSF<C> {
 impl<C: PDF>  BerGSF<C>{
     fn measurement_update(&mut self, measurements: &[DVector<f64>]) -> &Self {
         
+        println!("ok0");
         let predicted_state = self.predict_state();
         
         println!("ok1");

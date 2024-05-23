@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use nalgebra::{DMatrix, DVector};
 use numpy::{IntoPyArray, PyArray1, PyArrayMethods, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods};
-use statrs::distribution::{Continuous, MultivariateNormal};
+use statrs::{distribution::{Continuous, MultivariateNormal}, statistics::MeanN};
 use pyo3::{prelude::*, types::PyList}; 
 use crate::{BerGSF, GaussianMixture, LogWeight, MUniform, MeasurementModel, Model, MotionModel};
 
@@ -121,6 +121,17 @@ impl PyBerGSFUniformClutter {
         
         data
 
+    }
+
+    fn mean<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        
+        let gm = &self.filter.s.0;
+        let v: DVector<f64> = gm.iter().map(|(lnw, g)| {
+            lnw.exp() * g.mean().unwrap()
+        }).sum();
+
+        let v = v / (gm.len() as f64); 
+        v.data.as_vec().to_vec().into_pyarray_bound(py)
     }
 
     fn prob(&self) -> f64 {

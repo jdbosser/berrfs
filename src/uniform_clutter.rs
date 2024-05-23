@@ -123,9 +123,10 @@ impl PyBerGSFUniformClutter {
 
     }
 
-    fn mean<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+    fn mean<'py>(&mut self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
         
-        let gm = &self.filter.s.0;
+        let gm = self.filter.s.clone().normalize().0;
+        // let gm = &self.filter.s.0;
         let v: DVector<f64> = gm.iter().map(|(lnw, g)| {
             lnw.exp() * g.mean().unwrap()
         }).sum();

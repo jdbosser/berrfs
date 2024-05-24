@@ -17,4 +17,4 @@ statrs = "*"
 nalgebra = "*"
 itertools = "*"
 num-traits = "*"
-
+rand = "*"

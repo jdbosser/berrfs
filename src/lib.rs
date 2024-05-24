@@ -15,6 +15,8 @@ pub use gaussian_clutter::*;
 mod uniform_clutter; 
 pub use uniform_clutter::*; 
 
+mod berpf_detections;
+
 /// Formats the sum of two numbers as string.
 #[pyfunction]
 fn sum_as_string(a: usize, b: usize) -> PyResult<String> {
@@ -202,7 +204,7 @@ impl<C: PDF> BerGSF<C> {
 
         let gm_surv = self.s.0
             .iter()
-            .map(|(w, g)| {
+            .filter_map(|(w, g)| {
                 
                 // implements (94) and (95)
                 let cov = g.variance().unwrap(); 
@@ -212,12 +214,17 @@ impl<C: PDF> BerGSF<C> {
                 let q = &self.models.motion.q; 
 
                 let p_mean = (f * &mean).data.as_vec().to_vec();
-                let p_cov = (q + f * &cov * f.transpose()).data.as_vec().to_vec();
 
-                let p_g = MultivariateNormal::new(p_mean, p_cov)
+                let p_cov = (q + f * &cov * f.transpose()); //.data.as_vec().to_vec();
+                let p_cov = 1./2. * (p_cov.clone() + p_cov.transpose());
+
+
+                let p_g = MultivariateNormal::new(p_mean, p_cov.data.as_vec().to_vec())
                     .expect("Covariance not positive definite after prediction");
-
-                (w + mul_surv.ln(), p_g)
+                if mul_surv == 0.0 {
+                    return None
+                }
+                Some((w + mul_surv.ln(), p_g))
             }); 
 
         let mut vec_gmmix: Vec<(LogWeight, MultivariateNormal)> = gm_birth.chain(gm_surv).collect(); 
@@ -228,19 +235,15 @@ impl<C: PDF> BerGSF<C> {
             b.0.total_cmp(&a.0)
         });
 
-        // Take the 2000 first elements
-        vec_gmmix.truncate(2000);
 
         // Return a normalized prediction gmm, e.g. eq. (96)
         GaussianMixture(vec_gmmix).normalize() 
     }
 }
-impl<C: PDF>  BerGSF<C>{
+impl<C: PDF + std::fmt::Debug>  BerGSF<C>{
     fn measurement_update(&mut self, measurements: &[DVector<f64>]) -> &Self {
-        
         //  println!("ok0");
         let predicted_state = self.predict_state();
-        
         // println!("ok1");
 
         let log_weights = predicted_state.log_weights(); 
@@ -281,7 +284,7 @@ impl<C: PDF>  BerGSF<C>{
 
         }).collect(); 
 
-        let ln_lambda = self.models.lambda.ln(); 
+        let lambda = self.models.lambda; 
 
         let c: &C = &self.models.clutter_distribution; 
 
@@ -289,22 +292,24 @@ impl<C: PDF>  BerGSF<C>{
             
             log_weights.iter().zip(precalced.iter())
                 .map(|(lw, qz)| {
-                    (lw + qz.q.ln_pdf(z) - ln_lambda - c.ln_pdf(z)).exp()
+                    (lw.exp() * qz.q.pdf(z))/(lambda * c.pdf(z))
                 }).sum::<f64>()
 
         }).sum::<f64>() ); // (99)
          
         // println!("ok9");
-        let no_det = predicted_state.clone();
+        let mut no_det = predicted_state.clone().normalize();
 
         let det: Vec<_> = precalced.iter().zip(predicted_state.0.iter()).cartesian_product(measurements.iter())
-            .map(|((pc, pg), z)|{
+            .filter_map(|((pc, pg), z)|{
                 
                 let pmean = pg.1.mean().unwrap(); 
                 let pcov = pg.1.variance().unwrap(); 
                 let old_weight = pg.0; 
 
-
+                if !old_weight.is_finite() {
+                    return None
+                }
 
                 // println!("ok10");
                 let new_mean = pmean + &pc.k * (z - &pc.eta); // (103)
@@ -316,28 +321,112 @@ impl<C: PDF>  BerGSF<C>{
 
                 // println!("ok11");
                 let new_weight = old_weight + pc.q.ln_pdf(z) - self.models.lambda.ln() - c.ln_pdf(z); // (98)
+               //  dbg!(&old_weight);
+               //  dbg!(&pc.q.ln_pdf(z));
+               //  dbg!(&self.models.lambda.ln());
+               //  dbg!(&c.ln_pdf(z));
 
-                (new_weight, MultivariateNormal::new(new_mean.data.as_vec().to_vec(), new_cov.data.as_vec().to_vec()).expect("Error in creating gaussian"))
+                Some((new_weight, MultivariateNormal::new(new_mean.data.as_vec().to_vec(), new_cov.data.as_vec().to_vec()).expect("Error in creating gaussian")))
 
             }).collect(); 
-
-        let det = GaussianMixture(det);
+        
+         
+        let det = GaussianMixture(det).normalize();
         
         // Coefficients in front of (98)
-        let no_det = no_det.lnmul((1.0 - self.models.pd).ln() - (1.0 - delta_k).ln()); 
-        let det = det.lnmul(self.models.pd.ln() - (1.0 - delta_k).ln());
+        if self.models.pd < 1.0 {
+            no_det = no_det.lnmul((1.0 - self.models.pd).ln()); 
+        }
+        else {
+            no_det.0 = vec![]
+        }
+
+        // dbg!(&delta_k);
+        let det = det.lnmul(self.models.pd.ln());
 
         let new_s = GaussianMixture([no_det.0, det.0].concat());
-        
         let pq = (&self).predict_prob();
 
         // (97)
-        let new_q = ((1.0 - delta_k).ln() + pq.ln() - (1.0 - pq * delta_k).ln()).exp(); 
+        let new_q = ((1.0 - delta_k)/(1.0 - pq * delta_k)).min(1.0);
 
-        self.s = new_s; 
+        let mut new_s = new_s.normalize(); 
+        new_s.0.sort_by(|a,b| {b.0.total_cmp(&a.0)}); 
+        new_s.0.truncate(20); 
+        self.s = new_s.normalize(); 
         self.q = new_q; 
         
 
+
         self
     }
+}
+
+#[cfg(test)]
+mod tests {
+    
+    use super::*; 
+    fn create_bergs() -> BerGSF<MUniform> {
+        let models = Model {
+            measurement: MeasurementModel {
+                h: DMatrix::from_vec(2, 4, vec![1., 0., 0., 0., 0., 0., 1.0, 0.]), 
+                r: DMatrix::from_vec(2, 2, vec![1., 0., 0., 1.0])
+            },
+            motion: MotionModel {
+                f: DMatrix::from_vec(4, 4, vec![1., 1., 0., 0., 0., 1., 0., 0., 0., 0., 1., 1., 0., 0., 0., 1.]), 
+                q: DMatrix::from_vec(4,4, vec![0.0025, 0.005 , 0.    , 0.    , 0.005 , 0.01  , 0.    , 0.    ,
+       0.    , 0.    , 0.0025, 0.005 , 0.    , 0.    , 0.005 , 0.01  ])
+            }, 
+            birth_model: GaussianMixture(vec![(0., MultivariateNormal::new(vec![0., 0., 0., 0.], 
+                                                                           vec![
+                                                                           100.0, 0., 0., 0., 
+                                                                            0., 0.1, 0., 0.,
+                                                                            0., 0., 100.0, 0.,
+                                                                            0., 0., 0., 0.1]).unwrap() )]),
+            lambda: 0.0001, 
+            clutter_distribution: MUniform::new(DVector::from_vec(vec![-100., -100.]), DVector::from_vec(vec![100., 100.])), 
+            ps: 0.99, 
+            pb: 0.1, 
+            pd: 1.0,
+        };
+        let filter = BerGSF{
+            models, 
+            q: 0.0,
+            s: GaussianMixture(vec![])
+        };
+        filter
+    }
+    
+    #[test]
+    fn predict() {
+        let filter = create_bergs();
+
+        let pq = filter.predict_prob(); 
+        let ps = filter.predict_state(); 
+
+        assert!(ps.0.len() == 1); 
+        assert!(ps.0[0].0.is_finite())
+    }
+
+    #[test]
+    fn update() {
+        let mut filter = create_bergs();
+        let mut filter2 = filter.clone(); 
+        filter.measurement_update(&vec![]);
+        
+        // assert!(filter.s.0.len() == 1); 
+        // assert!(filter.s.0[0].0.is_finite()); 
+
+        filter2.models.pd = 1.0; 
+        filter2.measurement_update(&vec![]);
+        assert!(filter2.s.0.len() == 0); 
+    }
+
+    #[test]
+    fn update2() {
+        let mut filter = create_bergs();
+        filter.measurement_update(&vec![DVector::from_vec(vec![-40.43224192,  24.35469405]), DVector::from_vec(vec![-75.447954  ,  -91.14266698])]);
+        filter.measurement_update(&vec![DVector::from_vec(vec![40.43224192,  -24.35469405]), DVector::from_vec(vec![75.447954  ,  91.14266698])]);
+    }
+
 }

@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use nalgebra::{DMatrix, DVector};
-use numpy::{IntoPyArray, PyArray1, PyArrayMethods, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods};
-use statrs::{distribution::{Continuous, MultivariateNormal}, statistics::MeanN};
+use numpy::{ndarray::Array2, IntoPyArray, PyArray1, PyArray2, PyArrayMethods, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods};
+use statrs::{distribution::{Continuous, MultivariateNormal}, statistics::{MeanN, VarianceN}};
 use pyo3::{prelude::*, types::PyList}; 
 use crate::{BerGSF, GaussianMixture, LogWeight, MUniform, MeasurementModel, Model, MotionModel};
 
@@ -32,12 +32,18 @@ impl PyBerGSFUniformClutter {
         let h = h.to_vec().unwrap();
         let r = r.to_vec().unwrap();
 
+
         let gaussians: Vec<(LogWeight, MultivariateNormal)> = birth_model.iter().map(|bm| {
             let mean: PyVec = bm.getattr("mean").unwrap().extract().unwrap();
             let cov: PyMat = bm.getattr("cov").unwrap().extract().unwrap();
             let weight: f64 = bm.getattr("weight").unwrap().extract().unwrap();
-
-            (weight.ln(), MultivariateNormal::new(mean.to_vec().unwrap(), cov.to_vec().unwrap()).unwrap())
+            
+            println!("{:?}",mean.to_vec().unwrap());
+            println!("{:?}",cov.to_vec().unwrap()); 
+            let mm = DMatrix::from_vec(4, 4, cov.to_vec().unwrap());
+            println!("{:?}", mm); 
+            println!("{:?}", mm == mm.transpose()); 
+            (weight.ln(), MultivariateNormal::new(mean.to_vec().unwrap(), cov.to_vec().unwrap()).expect("failed creating gaussian"))
         }).collect(); 
         
         let (min, max): (Vec<f64>, Vec<f64>) = area.into_iter().unzip();
@@ -57,13 +63,13 @@ impl PyBerGSFUniformClutter {
             clutter_distribution: MUniform::new(min.into(), max.into())
         };
 
-        
-        PyBerGSFUniformClutter {
-            filter: BerGSF{
-                s: model.birth_model.clone(), 
+        let filter = BerGSF{
+                s: GaussianMixture(vec![]),// model.birth_model.clone(), 
                 models: model, 
                 q: 0.
-            }
+            } ;
+        PyBerGSFUniformClutter {
+            filter 
         }
     }
 
@@ -72,7 +78,8 @@ impl PyBerGSFUniformClutter {
         let class_name: String = slf.get_type().qualname()?;
         // To access fields of the Rust struct, we need to borrow the `PyCell`.
         let filter = &slf.borrow().filter; 
-        Ok(format!("{}(\n\tprob = {:#?},\n\t mixtures = {})", class_name, filter.q, filter.s.0.len()))
+        //Ok(format!("{}(\n\tprob = {:#?},\n\t mixtures = {})", class_name, filter.q, filter.s.0.len()))
+        Ok(format!("{:#?}", filter))
     }
 
     fn predict(mut slf: PyRefMut<Self>) -> PyRefMut<Self> {
@@ -83,7 +90,6 @@ impl PyBerGSFUniformClutter {
 
     fn update<'py>(mut slf: PyRefMut<'py, Self>, measurements: Vec<PyVec>) -> PyRefMut<'py, Self> {
         
-        println!("{:#?}", measurements); 
 
         // Convert the measurements to dvectors
         let measurements = measurements.iter().map(|m| {
@@ -104,6 +110,33 @@ impl PyBerGSFUniformClutter {
         let x = slf.filter.s.evaluate(&x);
 
         x.into_pyarray_bound(py)
+    }
+
+    fn marginalized_gaussians<'py>(slf: PyRef<'py, Self>, dimensions: Vec<u8>, py: Python<'py>) -> Vec<(f64, Bound<'py, PyArray1<f64>>, Bound<'py, PyArray2<f64>>)> {
+        
+        // Returns means and covariances in the dimensions requested. 
+        let v: Vec<(f64, Bound<'py, PyArray1<f64>>, Bound<'py, PyArray2<f64>>)> = slf.filter.s.0.iter().map(|(lnw, g)|{
+            
+            let mean = g.mean().unwrap();
+            let cov = g.variance().unwrap(); 
+
+            // Extract the dimensions
+            let sub_mean: DVector<f64> = dimensions.iter().map(|ii| {
+                mean[*ii as usize]
+            }).collect_vec().into();
+
+            let sub_cov: Vec<f64> = dimensions.iter().cartesian_product(dimensions.iter()).map(|(ii,jj)| {
+                cov[(*ii as usize,*jj as usize)]
+            }).collect_vec();
+            let sub_cov = DMatrix::from_vec(dimensions.len(), dimensions.len(), sub_cov);
+
+            // let mat = Array2::from_shape_vec((dimensions.len(), dimensions.len()), sub_cov.data.as_vec().to_vec());
+            
+            (lnw.exp(), sub_mean.data.as_vec().to_vec().into_pyarray_bound(py), sub_cov.data.as_vec().to_vec().into_pyarray_bound(py).reshape([dimensions.len(), dimensions.len()]).unwrap())
+
+        }).collect_vec();
+
+        v
 
     }
 

@@ -56,6 +56,8 @@ struct BirthModelS {
 }
 impl BirthModel<DVector<f64>> for BirthModelS {
     fn birth_model<R: Rng>(&self, measurements: &[DVector<f64>], size: usize, rng: &mut R) -> Vec<State> {
+
+        /*
         if measurements.len() < 0 {
             // Split up where to give birth to the particles
             let particles_per_measurement = (measurements.len() as f64 / ( size as f64)).floor() as usize; 
@@ -93,6 +95,12 @@ impl BirthModel<DVector<f64>> for BirthModelS {
                 DVector::from_vec(vec![x, vx, y, vy])
             }).collect_vec()
         }
+        */
+        (0..size).map(|_| {
+            DVector::from_vec(self.birth_uniform_area.iter().map(|(l, u)| {
+                rng.sample(Uniform::new(l, u))
+            }).collect_vec())
+        }).collect_vec()
 }}
 
 #[derive(Clone, Debug)]

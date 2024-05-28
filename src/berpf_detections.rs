@@ -29,7 +29,7 @@ type Particle = (LogWeight, State);
 
 // Marker structs
 #[derive(Debug, Clone)]
-struct Surviving<T>(T);
+pub struct Surviving<T>(pub T);
 impl<U: ?Sized, T: Deref<Target = U>> Surviving<T> {
     fn as_ref(&self) -> Surviving<&U> {
         // Lololol for the ref deref ref
@@ -63,9 +63,9 @@ impl<T> Deref for Born<T> {
 pub struct BerPFDetections<Motion, LogLikelihood, Measurement, ClutterLnPDF, BirthModel> 
 {
     model: Model<Motion, LogLikelihood, Measurement, ClutterLnPDF, BirthModel>,
-    q: f64, // Estimated probability
-    particles_s: Surviving<Vec<Particle>>, // Surviving particles,
-    particles_b: Born<Vec<Particle>>, // Newborn particles
+    pub q: f64, // Estimated probability
+    pub particles_s: Surviving<Vec<Particle>>, // Surviving particles,
+    pub particles_b: Born<Vec<Particle>>, // Newborn particles
 }
 
 impl<M, L, Mnt, C, BirthModel> BerPFDetections<M, L, Mnt, C, BirthModel> 
@@ -348,14 +348,14 @@ pub trait BirthModel<M> {
     fn birth_model<R: Rng>(&self, measurements: &[M], size: usize, rng: &mut R) -> Vec<State>; 
 }
 
-impl<MotionS, LogLikelihoodS, Measurement, ClutterLnPDFS, BirthModelS> BerPFDetections<MotionS, LogLikelihoodS, Measurement, ClutterLnPDFS, BirthModelS> 
+impl<MotionS, LogLikelihoodS, Measurement: Clone, ClutterLnPDFS, BirthModelS> BerPFDetections<MotionS, LogLikelihoodS, Measurement, ClutterLnPDFS, BirthModelS> 
 where
-    MotionS: Motion,
-    LogLikelihoodS: LogLikelihood<Measurement>, 
-    ClutterLnPDFS: ClutterLnPDF<Measurement>,
-    BirthModelS: BirthModel<Measurement>,
+    MotionS: Motion + Clone,
+    LogLikelihoodS: LogLikelihood<Measurement> + Clone, 
+    ClutterLnPDFS: ClutterLnPDF<Measurement> + Clone,
+    BirthModelS: BirthModel<Measurement> + Clone,
 {
-    pub fn measurement_update<R: Rng>(mut self, measurements: &[Measurement], rng: &mut R) -> Self {
+    pub fn measurement_update<R: Rng>(&self, measurements: &[Measurement], rng: &mut R) -> Self {
 
 
         let loglikelihood = |z: &Measurement, state: &State| {
@@ -461,7 +461,7 @@ where
         }).collect_vec());
 
         Self {
-            model: self.model, 
+            model: self.model.clone(), 
             particles_s: survivng_particles, 
             particles_b: newborn_particles,
             q: new_q,

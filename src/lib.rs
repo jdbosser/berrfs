@@ -27,6 +27,7 @@ fn bergsf(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Number>()?; 
     m.add_class::<PyBerGSFGaussianClutter>()?; 
     m.add_class::<PyBerGSFUniformClutter>()?; 
+    m.add_class::<PyBerPFDetections>()?; 
     Ok(())
 }
 
@@ -152,7 +153,9 @@ fn test() {
     type_check(x); 
 }
 
-use statrs::distribution::Continuous; 
+use statrs::distribution::Continuous;
+
+use crate::pyberpf_detections::PyBerPFDetections; 
 #[derive(Debug, Clone)]
 struct Model<C: PDF> {
     measurement: MeasurementModel, 

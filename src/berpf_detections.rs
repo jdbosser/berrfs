@@ -1,29 +1,29 @@
-use std::{marker::PhantomData, ops::Deref};
+use std::{marker::PhantomData, ops::{Deref, DerefMut}};
 
 use itertools::Itertools;
 use nalgebra::DVector;
 use rand::{distributions::Uniform, Rng};
 
 #[derive(Debug, Clone)]
-struct Model<Motion, LogLikelihood, Measurement, ClutterLnPDF, BirthModel>
+pub struct Model<Motion, LogLikelihood, Measurement, ClutterLnPDF, BirthModel>
 {
-    pb: f64, // probability of birth
-    ps: f64, // probability of survival
-    pd: f64, // probability of detection,
-    lambda: f64, // Clutter intensity
-    motion: Motion, // Motion model
-    loglikelihood: LogLikelihood, // Measurement model
-    measurement_type: PhantomData<Measurement>, //
-    clutter_lnpdf: ClutterLnPDF,
-    nsurv: usize, 
-    nborn: usize,
-    birth_model: BirthModel,
+    pub pb: f64, // probability of birth
+    pub ps: f64, // probability of survival
+    pub pd: f64, // probability of detection,
+    pub lambda: f64, // Clutter intensity
+    pub motion: Motion, // Motion model
+    pub loglikelihood: LogLikelihood, // Measurement model
+    pub measurement_type: PhantomData<Measurement>, //
+    pub clutter_lnpdf: ClutterLnPDF,
+    pub nsurv: usize, 
+    pub nborn: usize,
+    pub birth_model: BirthModel,
      
 } 
 
 type LogWeight = f64;
 
-type State = DVector<f64>;
+pub type State = DVector<f64>;
 
 type Particle = (LogWeight, State);
 
@@ -60,12 +60,24 @@ impl<T> Deref for Born<T> {
 }
 
 #[derive(Debug, Clone)]
-struct BerPFDetections<Motion, LogLikelihood, Measurement, ClutterLnPDF, BirthModel> 
+pub struct BerPFDetections<Motion, LogLikelihood, Measurement, ClutterLnPDF, BirthModel> 
 {
     model: Model<Motion, LogLikelihood, Measurement, ClutterLnPDF, BirthModel>,
     q: f64, // Estimated probability
     particles_s: Surviving<Vec<Particle>>, // Surviving particles,
     particles_b: Born<Vec<Particle>>, // Newborn particles
+}
+
+impl<M, L, Mnt, C, BirthModel> BerPFDetections<M, L, Mnt, C, BirthModel> 
+{
+    pub fn new(initial_prob: Option<f64>, model: Model<M, L, Mnt, C, BirthModel>) -> Self {
+        Self {
+            model, 
+            q: initial_prob.unwrap_or(0.0).min(1.0).max(0.0), 
+            particles_s: Surviving(vec![]),
+            particles_b: Born(vec![]),
+        }
+    }
 }
 
 fn predict_prob(prob: f64, pb: f64, ps: f64) -> f64 {
@@ -323,21 +335,32 @@ fn predict_particle_weights(
     (Surviving(new_sp), Born(new_bp))
 }
 
-impl<Motion, LogLikelihood, Measurement, ClutterLnPDF, BirthModel> BerPFDetections<Motion, LogLikelihood, Measurement, ClutterLnPDF, BirthModel> 
+trait Motion2 {
+    fn motion<R: Rng>(&self, state: &State, rng: &mut R) -> State; 
+}
+
+impl<Motion, LogLikelihood, Measurement, ClutterLnPDF, BirthModel, R> BerPFDetections<Motion, LogLikelihood, Measurement, ClutterLnPDF, BirthModel> 
 where
-    Motion: FnMut(&State) -> State,
-    LogLikelihood: Fn(&Measurement, &State) -> f64, 
-    ClutterLnPDF: Fn(&Measurement) -> f64,
-    BirthModel: FnMut(&[Measurement], usize) -> Vec<State>,
+    Motion: Deref<Target = dyn Fn(&State, &mut R) -> State>,
+    R: Rng, 
+    LogLikelihood: Deref<Target = dyn for<'a, 'b> Fn(&'a Measurement, &'b State) -> f64>, 
+    ClutterLnPDF: Deref<Target = dyn Fn(&Measurement) -> f64>,
+    BirthModel: Deref<Target = dyn Fn(&[Measurement], usize, &mut R) -> Vec<State>>,
 {
-    fn update<R: Rng>(mut self, measurements: &[Measurement], rng: &mut R) -> Self {
+    pub fn measurement_update(mut self, measurements: &[Measurement], rng: &mut R) -> Self {
 
         // Line 3, equation (28)
         let predicted_q = predict_prob(self.q, self.model.pb, self.model.ps);
+
+
+        // Quickly construct functions that wrap the random number generator
+        let mut wrapped_motion = |state: &State| {
+            (self.model.motion)(state, rng)
+        };
         
         // Line 4
-        let predicted_particles_surv = Surviving(predict_particle_positions(self.particles_s.as_ref().0, &mut self.model.motion));
-        let predicted_particles_born = Born(predict_particle_positions(self.particles_b.as_ref().0, &mut self.model.motion));
+        let predicted_particles_surv = Surviving(predict_particle_positions(self.particles_s.as_ref().0, &mut wrapped_motion));
+        let predicted_particles_born = Born(predict_particle_positions(self.particles_b.as_ref().0, &mut wrapped_motion));
         
         // Line 5, using (82)
         let predicted_particles: (Surviving<_>, Born<_>) = predict_particle_weights(
@@ -359,14 +382,14 @@ where
             approximate_i2(
                 z, self.model.pd, 
                 predicted_particles.0.as_ref(), predicted_particles.1.as_ref(), 
-                &self.model.loglikelihood
+                &*self.model.loglikelihood
             )
         };
         
         // Line 8, using (86)
         let delta_k = compute_delta_k(
             approx_i1, self.model.lambda, 
-            &self.model.clutter_lnpdf, 
+            &*self.model.clutter_lnpdf, 
             &approx_i2, 
             measurements
         );
@@ -381,8 +404,8 @@ where
                 pred_particles_surv.as_ref().0, 
                 measurements, 
                 self.model.pd, self.model.lambda, 
-                &self.model.loglikelihood, 
-                &self.model.clutter_lnpdf
+                &*self.model.loglikelihood, 
+                &*self.model.clutter_lnpdf
                 )
             );
         
@@ -392,8 +415,8 @@ where
                pred_particles_born.as_ref().0, 
                measurements, 
                self.model.pd, self.model.lambda, 
-               &self.model.loglikelihood, 
-               &self.model.clutter_lnpdf
+               &*self.model.loglikelihood, 
+               &*self.model.clutter_lnpdf
                )
            );
         
@@ -409,9 +432,13 @@ where
 
         // Set surviving particle weight, line 17
         let survivng_particles = Surviving(set_logweights(&survivng_particles, surv_weight));
+        
+        let mut wrapped_birth_model = |measurements: &[Measurement], nbirth: usize| {
+            (self.model.birth_model)(measurements, nbirth, rng)
+        };
 
         // Draw birth particles, line 18 and line 19
-        let newborn_particles: Vec<State> = (self.model.birth_model)(measurements, self.model.nborn); 
+        let newborn_particles: Vec<State> = wrapped_birth_model(measurements, self.model.nborn); 
         let born_weight = (1.0/(self.model.nborn as f64)).ln();
         let newborn_particles: Born<Vec<Particle>> = Born(newborn_particles.into_iter().map(|state| {
             (born_weight, state)
@@ -426,6 +453,8 @@ where
 
     }
 }
+
+
 
 #[cfg(test)]
 mod tests {

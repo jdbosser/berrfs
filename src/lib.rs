@@ -12,6 +12,7 @@ mod uniform_clutter;
 pub use uniform_clutter::*; 
 
 mod berpf_detections;
+mod pyberpf_detections; 
 
 /// Formats the sum of two numbers as string.
 #[pyfunction]

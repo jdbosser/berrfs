@@ -5,12 +5,12 @@ from matplotlib.patches import Ellipse
 import matplotlib.transforms as transforms
 import math
 
-num_time_steps = 100 
+num_time_steps = 1000
 
-llambda = 0.0001
+llambda = 0.00001
 pd = 0.5
-pb = 0.1
-ps = 0.99
+pb = 0.01
+ps = 0.999
 
 area = [(-100.0, 100.0), (-100.0, 100.0)]
 tot_area= 200 * 200
@@ -23,7 +23,7 @@ f = np.array([[1, 1, 0, 0], [0, 1, 0, 0], [0, 0, 1, 1], [0, 0, 0, 1]])
 g = np.array([[1/2, 0], [1, 0], [0, 1/2], [0, 1]])
 q = np.diag([1,1]) * 0.1**2
 h = np.array([[1, 0, 0, 0], [0, 0, 1, 0]])
-r = np.diag([1, 1]) * 0.1**2
+r = np.diag([1, 1]) * 2.0**2
 # r = np.diag([0, 0])
 
 f,g,q,h,r = asfloat(f, g, q, h, r)
@@ -36,6 +36,7 @@ birth_cov = np.diag([10**2, 0.1, 10**2, 0.1]).astype(float)
 def generate_clutter(): 
 
     num = np.random.poisson(llambda * tot_area)
+    print(llambda * tot_area)
     return [
         [np.random.uniform(mi, ma) for (mi, ma) in area ]
         for _ in range(num)
@@ -108,8 +109,8 @@ def animate_detections(detections_over_time):
 
 def setup_filter(): 
 
-    from bergsf import BerGSFUniformClutter, GaussianComponent
-    tracker = BerGSFUniformClutter(f, qf, h, r, [GaussianComponent(1.0, mean=birth_mean, cov = birth_cov)], llambda * tot_area, area, ps, pb, pd)
+    from bergsf import BerPFDetections
+    tracker = BerPFDetections(f, g, q, h, r, llambda, 1000, 100, [(-100.0, 100.0), (-math.sqrt(0.2), math.sqrt(0.2)), (-100.0, 100.), (-math.sqrt(0.2), math.sqrt(0.2))], pb, ps, pd)
     return tracker 
 
 def track(detections, filter): 
@@ -123,8 +124,10 @@ def track(detections, filter):
         filter.update(det)
         if filter.prob() > 1:
             breakpoint()
-        print(filter.prob())
-        yield det, filter.marginalized_gaussians((0, 2)), filter.prob()
+        print("py", k, filter.prob())
+        # print(filter.weights())
+
+        yield det, filter.particles(), filter.weights()
 
 def confidence_ellipse(mean, cov, n_std=3.0, facecolor='none', **kwargs):
     """
@@ -176,15 +179,14 @@ def confidence_ellipse(mean, cov, n_std=3.0, facecolor='none', **kwargs):
 
 def dets_and_gauss_to_plot(ax, dets_and_gauss): 
     
-    det, gausss, _ = dets_and_gauss
+    det, gausss, weights = dets_and_gauss
     det = np.array(det)
     artists = []
     if len(det) > 0 and det[0].shape[0]>0:
         artists.append(ax.plot(det[:, 0], det[:, 1], marker = ".", linewidth = 0)[0])
     
-    for gaus in gausss: 
-        # print(gausss) 
-        artists.append(ax.scatter(gaus[1][0], gaus[1][1], marker = "o", alpha = gaus[0]))
+    # print(gausss) 
+    artists.append(ax.scatter(gausss[:, 0], gausss[:, 2], marker = ".", c = weights, cmap = "viridis"))
 
 
     

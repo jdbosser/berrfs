@@ -62,7 +62,7 @@ impl<T> Deref for Born<T> {
 #[derive(Debug, Clone)]
 pub struct BerPFDetections<Motion, LogLikelihood, Measurement, ClutterLnPDF, BirthModel> 
 {
-    model: Model<Motion, LogLikelihood, Measurement, ClutterLnPDF, BirthModel>,
+    pub model: Model<Motion, LogLikelihood, Measurement, ClutterLnPDF, BirthModel>,
     pub q: f64, // Estimated probability
     pub particles_s: Surviving<Vec<Particle>>, // Surviving particles,
     pub particles_b: Born<Vec<Particle>>, // Newborn particles
@@ -153,6 +153,8 @@ fn weight_update_single_particle_part<M>(
     
     // Computes the sum in equation (87)
     let logs = measurements.iter().map(|z| {
+        let lng = log_likelihood_fn(z, &particle.1); 
+        // dbg!(&lng);
         log_likelihood_fn(z, &particle.1) - lnlambda - clutter_lnpdf(z)
     }).collect_vec();
 
@@ -268,7 +270,7 @@ fn sysresample_deterministic(particles: &[Particle], n: usize, u_tilde: f64) -> 
             .unwrap_or_else(|| panic!("Cannot sort the particles, due to weight a: {va} is not comparable to b: {vb}"))
     });
         
-    particles.iter().for_each(|p| {dbg!(&p.0.exp());} );
+    // particles.iter().for_each(|p| {dbg!(&p.0.exp());} );
         
     // Create the cumulative distribution function
     let f = particles.iter().map(|p| p.0.exp()).scan(0.0, |state, x|{
@@ -276,13 +278,13 @@ fn sysresample_deterministic(particles: &[Particle], n: usize, u_tilde: f64) -> 
 
         Some(*state)
     }).collect_vec();
-    dbg!(&f);
+    // dbg!(&f);
     
     // This returns the index of uk
     let f_inv = |u: f64| {
         // u goes between 0. and 1. What particle does this correspond to? 
-        println!("=======");
-        dbg!(&u);
+        //println!("=======");
+        // dbg!(&u);
         f.partition_point(|ff| (*ff < u))
     };
 
@@ -292,8 +294,6 @@ fn sysresample_deterministic(particles: &[Particle], n: usize, u_tilde: f64) -> 
         
         // Which bin does the uks end up in?
         let indices = uks.map(f_inv);
-
-        indices.clone();
 
         // Create a vector of these particles, and return
         return indices.map(|ii| particles[ii].clone()).collect_vec()
@@ -442,11 +442,15 @@ where
         let all_particles = normalize_particle_weights(&all_particles);
 
 
+
+        // dbg!(all_particles.iter().map(|p| p.0).fold(f64::INFINITY, |a,b| a.min(b)));
+        // dbg!(all_particles.iter().map(|p| p.0).fold(f64::NEG_INFINITY, |a,b| a.max(b)));
         // Resample, line 12-16
         let survivng_particles = sysresample(&all_particles, self.model.nsurv, rng);
-        let surv_weight = (1.0 / (self.model.nsurv as f64) ).ln(); 
+        
 
         // Set surviving particle weight, line 17
+        let surv_weight = (1.0 / (self.model.nsurv as f64) ).ln(); 
         let survivng_particles = Surviving(set_logweights(&survivng_particles, surv_weight));
         
         let mut wrapped_birth_model = |measurements: &[Measurement], nbirth: usize| {
@@ -459,7 +463,6 @@ where
         let newborn_particles: Born<Vec<Particle>> = Born(newborn_particles.into_iter().map(|state| {
             (born_weight, state)
         }).collect_vec());
-
         Self {
             model: self.model.clone(), 
             particles_s: survivng_particles, 

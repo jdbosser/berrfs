@@ -45,7 +45,7 @@ impl<T> Deref for Surviving<T> {
 }
 
 #[derive(Debug, Clone)]
-struct Born<T>(T);
+pub struct Born<T>(pub T);
 impl<U: ?Sized, T: Deref<Target = U>> Born<T> {
     fn as_ref(&self) -> Born<&U> {
         Born(self.0.deref())

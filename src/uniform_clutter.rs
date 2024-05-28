@@ -1,6 +1,6 @@
 use itertools::Itertools;
 use nalgebra::{DMatrix, DVector};
-use numpy::{ndarray::Array2, IntoPyArray, PyArray1, PyArray2, PyArrayMethods, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods};
+use numpy::{IntoPyArray, PyArray1, PyArray2, PyArrayMethods, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods};
 use statrs::{distribution::{Continuous, MultivariateNormal}, statistics::{MeanN, VarianceN}};
 use pyo3::{prelude::*, types::PyList}; 
 use crate::{BerGSF, GaussianMixture, LogWeight, MUniform, MeasurementModel, Model, MotionModel};

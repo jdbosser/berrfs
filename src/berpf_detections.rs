@@ -68,7 +68,7 @@ fn predict_particle_positions(
     particles
         .to_owned()
         .iter_mut()
-        .map(|(w, state)| (*w, motion(&state)))
+        .map(|(w, state)| (*w, motion(state)))
         .collect()
 }
 
@@ -151,14 +151,14 @@ fn weight_update_mut<'a, M>(
         .iter_mut()
         .for_each(|particle| {
         let new_weight = (1. - pd + pd * weight_update_single_particle_part(
-            *particle, 
+            particle, 
             measurements, 
             log_likelihood_fn, 
             lnlambda, 
             clutter_lnpdf, 
         ).exp()).ln() + particle.0;
 
-        (*particle).0 = new_weight; 
+        particle.0 = new_weight; 
     });
 
     particles
@@ -242,7 +242,7 @@ fn sysresample_deterministic(particles: &[Particle], n: usize, u_tilde: f64) -> 
         let va = a.0; 
         let vb = b.0; 
         va.partial_cmp(&vb)
-            .expect(format!("Cannot sort the particles, due to weight a: {va} is not comparable to b: {vb}").as_str())
+            .unwrap_or_else(|| panic!("Cannot sort the particles, due to weight a: {va} is not comparable to b: {vb}"))
     });
         
     particles.iter().for_each(|p| {dbg!(&p.0.exp());} );
@@ -268,7 +268,7 @@ fn sysresample_deterministic(particles: &[Particle], n: usize, u_tilde: f64) -> 
         let uks = (0..n).map(|k| ((k as f64) + u_tilde)/nf  ); 
         
         // Which bin does the uks end up in?
-        let indices = uks.map(|u| f_inv(u));
+        let indices = uks.map(f_inv);
 
         indices.clone();
 
@@ -296,8 +296,8 @@ fn predict_particle_weights(
 
     let n_s = surviving_particles.0.len() as f64; 
     let n_b = born_particles.0.len() as f64; 
-    let coef_s = ((ps * prob / predict_prob));
-    let coef_b = (pb * (1.0 - prob) / predict_prob); 
+    let coef_s = ps * prob / predict_prob;
+    let coef_b = pb * (1.0 - prob) / predict_prob; 
 
     let coef_s = coef_s.ln(); 
     let coef_b = coef_b.ln(); 

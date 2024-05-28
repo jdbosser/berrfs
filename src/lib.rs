@@ -1,12 +1,8 @@
-use std::error::Error;
-use std::marker::PhantomData;
-use std::ops::Deref;
 
 use pyo3::prelude::*;
-use pyo3::types::PyList; 
+ 
 use itertools::{self, Itertools}; 
-use numpy::ndarray::{ArrayD, ArrayViewD, ArrayViewMutD, Array1};
-use numpy::{IntoPyArray, PyArray, PyArray1, PyArrayDyn, PyArrayMethods, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods};
+use numpy::{PyArrayMethods};
 
 
 mod gaussian_clutter; 
@@ -66,7 +62,7 @@ impl GaussianMixture {
         let norm = logsumexp(&all_weights);
 
         for d in self.0.iter_mut() {
-            d.0 = d.0 - norm; 
+            d.0 -= norm; 
         }
 
         self
@@ -79,7 +75,7 @@ impl GaussianMixture {
     fn lnmul(mut self, log_num: f64) -> Self {
          
         for (w, _) in self.0.iter_mut() {
-            *w = *w + log_num
+            *w += log_num
         }
 
         self
@@ -123,7 +119,7 @@ impl MUniform {
     fn new(min: DVector<f64>, max: DVector<f64>) -> MUniform {
         let uniforms = min.iter().zip(max.iter()).map(|(mn, ma)|{
             Uniform::new(*mn, *ma)
-                .expect(&format!("Cannot create a uniform distribution from {} to {}", mn, ma))
+                .unwrap_or_else(|_| panic!("Cannot create a uniform distribution from {} to {}", mn, ma))
         }).collect();
 
         MUniform {uniforms}
@@ -215,7 +211,7 @@ impl<C: PDF> BerGSF<C> {
 
                 let p_mean = (f * &mean).data.as_vec().to_vec();
 
-                let p_cov = (q + f * &cov * f.transpose()); //.data.as_vec().to_vec();
+                let p_cov = q + f * &cov * f.transpose(); //.data.as_vec().to_vec();
                 let p_cov = 1./2. * (p_cov.clone() + p_cov.transpose());
 
 
@@ -268,16 +264,16 @@ impl<C: PDF + std::fmt::Debug>  BerGSF<C>{
         let precalced: Vec<PerGauss> = predicted_state.0.iter().map(|(w, g)| {
 
             // println!("ok4");
-            let eta = (h * g.mean().unwrap()); // (101)
+            let eta = h * g.mean().unwrap(); // (101)
             // println!("ok5");
-            let s = (h * g.variance().unwrap() * h.transpose() + r); // (102)
+            let s = h * g.variance().unwrap() * h.transpose() + r; // (102)
                                                                       
             // println!("ok6");
             let q = MultivariateNormal::new(eta.data.as_vec().to_vec(), (s).data.as_vec().to_vec())
                 .expect("Measurement model non sym-pos-def matrix"); 
 
             // println!("ok7");
-            let k = (g.variance().unwrap() * h.transpose()) * (&s).clone().try_inverse().expect("Unable to invert the S-matrix."); 
+            let k = (g.variance().unwrap() * h.transpose()) * s.clone().try_inverse().expect("Unable to invert the S-matrix."); 
 
             // println!("ok8");
             PerGauss{eta, s, q, k}
@@ -345,7 +341,7 @@ impl<C: PDF + std::fmt::Debug>  BerGSF<C>{
         let det = det.lnmul(self.models.pd.ln());
 
         let new_s = GaussianMixture([no_det.0, det.0].concat());
-        let pq = (&self).predict_prob();
+        let pq = self.predict_prob();
 
         // (97)
         let new_q = ((1.0 - delta_k)/(1.0 - pq * delta_k)).min(1.0);

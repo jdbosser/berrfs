@@ -7,7 +7,7 @@ import math
 
 num_time_steps = 1000
 
-llambda = 0.00001
+llambda = 0.0001
 pd = 0.5
 pb = 0.01
 ps = 0.999
@@ -36,7 +36,7 @@ birth_cov = np.diag([10**2, 0.1, 10**2, 0.1]).astype(float)
 def generate_clutter(): 
 
     num = np.random.poisson(llambda * tot_area)
-    print(llambda * tot_area)
+    # print(llambda * tot_area)
     return [
         [np.random.uniform(mi, ma) for (mi, ma) in area ]
         for _ in range(num)
@@ -110,7 +110,7 @@ def animate_detections(detections_over_time):
 def setup_filter(): 
 
     from bergsf import BerPFDetections
-    tracker = BerPFDetections(f, g, q, h, r, llambda, 1000, 100, [(-100.0, 100.0), (-math.sqrt(0.2), math.sqrt(0.2)), (-100.0, 100.), (-math.sqrt(0.2), math.sqrt(0.2))], pb, ps, pd)
+    tracker = BerPFDetections(f, g, q, h, r, llambda, 1000, 1000, [(-100.0, 100.0), (-math.sqrt(0.2), math.sqrt(0.2)), (-100.0, 100.), (-math.sqrt(0.2), math.sqrt(0.2))], pb, ps, pd)
     return tracker 
 
 def track(detections, filter): 

@@ -1,14 +1,24 @@
-use std::ops::Deref;
+use std::{marker::PhantomData, ops::Deref};
 
 use itertools::Itertools;
 use nalgebra::DVector;
 use rand::{distributions::Uniform, Rng};
 
 #[derive(Debug, Clone)]
-struct Model<Motion>{
+struct Model<Motion, LogLikelihood, Measurement, ClutterLnPDF, BirthModel>
+{
     pb: f64, // probability of birth
     ps: f64, // probability of survival
-    motion: Motion         //
+    pd: f64, // probability of detection,
+    lambda: f64, // Clutter intensity
+    motion: Motion, // Motion model
+    loglikelihood: LogLikelihood, // Measurement model
+    measurement_type: PhantomData<Measurement>, //
+    clutter_lnpdf: ClutterLnPDF,
+    nsurv: usize, 
+    nborn: usize,
+    birth_model: BirthModel,
+     
 } 
 
 type LogWeight = f64;
@@ -50,8 +60,9 @@ impl<T> Deref for Born<T> {
 }
 
 #[derive(Debug, Clone)]
-struct BerPFDetections<Motion> {
-    model: Model<Motion>,
+struct BerPFDetections<Motion, LogLikelihood, Measurement, ClutterLnPDF, BirthModel> 
+{
+    model: Model<Motion, LogLikelihood, Measurement, ClutterLnPDF, BirthModel>,
     q: f64, // Estimated probability
     particles_s: Surviving<Vec<Particle>>, // Surviving particles,
     particles_b: Born<Vec<Particle>>, // Newborn particles
@@ -63,7 +74,7 @@ fn predict_prob(prob: f64, pb: f64, ps: f64) -> f64 {
 
 fn predict_particle_positions(
     particles: &[Particle], 
-    motion: &mut dyn FnMut(&State) -> State
+    motion: &mut dyn FnMut(&State) -> State // FnMut since it can contain a mutating rng. 
     ) -> Vec<Particle> {
     particles
         .to_owned()
@@ -312,12 +323,107 @@ fn predict_particle_weights(
     (Surviving(new_sp), Born(new_bp))
 }
 
-impl<Motion> BerPFDetections<Motion> {
-    fn update(&mut self) -> &Self {
+impl<Motion, LogLikelihood, Measurement, ClutterLnPDF, BirthModel> BerPFDetections<Motion, LogLikelihood, Measurement, ClutterLnPDF, BirthModel> 
+where
+    Motion: FnMut(&State) -> State,
+    LogLikelihood: Fn(&Measurement, &State) -> f64, 
+    ClutterLnPDF: Fn(&Measurement) -> f64,
+    BirthModel: FnMut(&[Measurement], usize) -> Vec<State>,
+{
+    fn update<R: Rng>(mut self, measurements: &[Measurement], rng: &mut R) -> Self {
 
-        // Line 2, equation (28)
-        let pred_q = predict_prob(self.q, self.model.pb, self.model.ps);; 
-        todo!(); 
+        // Line 3, equation (28)
+        let predicted_q = predict_prob(self.q, self.model.pb, self.model.ps);
+        
+        // Line 4
+        let predicted_particles_surv = Surviving(predict_particle_positions(self.particles_s.as_ref().0, &mut self.model.motion));
+        let predicted_particles_born = Born(predict_particle_positions(self.particles_b.as_ref().0, &mut self.model.motion));
+        
+        // Line 5, using (82)
+        let predicted_particles: (Surviving<_>, Born<_>) = predict_particle_weights(
+            predicted_particles_surv.as_ref(), 
+            predicted_particles_born.as_ref(), 
+            self.q, self.model.pb, self.model.ps 
+        );
+
+        // Line 6, using (85)
+        let approx_i1 = approximate_i1(
+            self.model.pd, 
+            predicted_particles.0.as_ref(), 
+            predicted_particles.1.as_ref()
+        ); 
+        
+        // This is not computed, but gives the function I2(z) at line 7. 
+        // Kind of line 7
+        let approx_i2 = |z: &Measurement| {
+            approximate_i2(
+                z, self.model.pd, 
+                predicted_particles.0.as_ref(), predicted_particles.1.as_ref(), 
+                &self.model.loglikelihood
+            )
+        };
+        
+        // Line 8, using (86)
+        let delta_k = compute_delta_k(
+            approx_i1, self.model.lambda, 
+            &self.model.clutter_lnpdf, 
+            &approx_i2, 
+            measurements
+        );
+        
+        let new_q = existance_update(delta_k, predicted_q);
+        
+
+        // Weight update, line 10
+        let pred_particles_surv: Surviving<Vec<Particle>> = predicted_particles.0; 
+        let particles_surv = Surviving(
+            weight_update(
+                pred_particles_surv.as_ref().0, 
+                measurements, 
+                self.model.pd, self.model.lambda, 
+                &self.model.loglikelihood, 
+                &self.model.clutter_lnpdf
+                )
+            );
+        
+        let pred_particles_born: Born<Vec<Particle>> = predicted_particles.1; 
+        let mut particles_born = Born(
+           weight_update(
+               pred_particles_born.as_ref().0, 
+               measurements, 
+               self.model.pd, self.model.lambda, 
+               &self.model.loglikelihood, 
+               &self.model.clutter_lnpdf
+               )
+           );
+        
+        // Normalize weights, line 11
+        particles_born.0.extend(particles_surv.0);
+        let all_particles = particles_born.0; 
+        let all_particles = normalize_particle_weights(&all_particles);
+
+
+        // Resample, line 12-16
+        let survivng_particles = sysresample(&all_particles, self.model.nsurv, rng);
+        let surv_weight = (1.0 / (self.model.nsurv as f64) ).ln(); 
+
+        // Set surviving particle weight, line 17
+        let survivng_particles = Surviving(set_logweights(&survivng_particles, surv_weight));
+
+        // Draw birth particles, line 18 and line 19
+        let newborn_particles: Vec<State> = (self.model.birth_model)(measurements, self.model.nborn); 
+        let born_weight = (1.0/(self.model.nborn as f64)).ln();
+        let newborn_particles: Born<Vec<Particle>> = Born(newborn_particles.into_iter().map(|state| {
+            (born_weight, state)
+        }).collect_vec());
+
+        Self {
+            model: self.model, 
+            particles_s: survivng_particles, 
+            particles_b: newborn_particles,
+            q: new_q,
+        } 
+
     }
 }
 
@@ -554,6 +660,23 @@ mod tests {
         assert_eq!(
             normalize_weights(&[4.0_f64.ln(), 1.0_f64.ln()]),
             vec![0.8_f64.ln(), 0.2_f64.ln()]
+        );
+    }
+
+    #[test]
+    fn test_normalize_particle_weights() {
+
+        let particles = vec![
+            (4.0_f64.ln(), State::from_vec(vec![0.0])), 
+            (1.0_f64.ln(), State::from_vec(vec![1.0])),
+        ];
+
+        assert_eq!(
+            normalize_particle_weights(&particles),
+            vec![
+            (0.8_f64.ln(), State::from_vec(vec![0.0])), 
+            (0.2_f64.ln(), State::from_vec(vec![1.0])),
+            ]
         );
     }
 

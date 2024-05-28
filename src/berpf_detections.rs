@@ -2,6 +2,7 @@ use std::ops::Deref;
 
 use itertools::Itertools;
 use nalgebra::DVector;
+use rand::{distributions::Uniform, Rng};
 
 #[derive(Debug, Clone)]
 struct Model<Motion>{
@@ -119,6 +120,79 @@ fn approximate_i1(pd: f64, particles_s: Surviving<&[Particle]>, particles_b: Bor
     }).collect_vec())
 }
 
+/// Computes the sum in equation (87)
+fn weight_update_single_particle_part<M>(
+    particle: &Particle, 
+    measurements: &[M],
+    log_likelihood_fn: &dyn Fn(&M, &State) -> f64, 
+    lnlambda: f64, 
+    clutter_lnpdf: &dyn Fn(&M) -> f64) -> f64 {
+    
+    // Computes the sum in equation (87)
+    let logs = measurements.iter().map(|z| {
+        log_likelihood_fn(z, &particle.1) - lnlambda - clutter_lnpdf(z)
+    }).collect_vec();
+
+    logsumexp(&logs)
+}
+
+fn weight_update_mut<'a, M>(
+        particles: &'a mut [&'a mut Particle], 
+        measurements: &[M], 
+        pd: f64, 
+        lambda: f64, 
+        log_likelihood_fn: &dyn Fn(&M, &State) -> f64, 
+        clutter_lnpdf: &dyn Fn(&M) -> f64, 
+    ) -> &'a mut [&'a mut Particle] {
+    
+    let lnlambda = lambda.ln(); 
+
+    particles
+        .iter_mut()
+        .for_each(|particle| {
+        let new_weight = (1. - pd + pd * weight_update_single_particle_part(
+            *particle, 
+            measurements, 
+            log_likelihood_fn, 
+            lnlambda, 
+            clutter_lnpdf, 
+        ).exp()).ln() + particle.0;
+
+        (*particle).0 = new_weight; 
+    });
+
+    particles
+}
+
+
+fn weight_update<'a, M>(
+        particles: &[Particle], 
+        measurements: &[M], 
+        pd: f64, 
+        lambda: f64, 
+        log_likelihood_fn: &dyn Fn(&M, &State) -> f64, 
+        clutter_lnpdf: &dyn Fn(&M) -> f64, 
+    ) -> Vec<Particle> {
+    
+    let lnlambda = lambda.ln(); 
+
+    particles
+        .iter()
+        .map(|particle| {
+        let new_weight = (1. - pd + pd * weight_update_single_particle_part(
+            particle, 
+            measurements, 
+            log_likelihood_fn, 
+            lnlambda, 
+            clutter_lnpdf, 
+        ).exp()).ln() + particle.0;
+        let mut particle = particle.clone();
+        particle.0 = new_weight; 
+        particle
+    }).collect()
+
+}
+
 fn approximate_i2<M>(z: &M, pd: f64, particles_s: Surviving<&[Particle]>, particles_b: Born<&[Particle]>, log_likelihood_fn: &dyn Fn(&M, &State) -> f64) -> f64 {
     let all_particles: &[Particle] = &[particles_s.0, particles_b.0].concat();
     let lnpd = pd.ln(); 
@@ -130,6 +204,87 @@ fn approximate_i2<M>(z: &M, pd: f64, particles_s: Surviving<&[Particle]>, partic
 
 fn existance_update(delta_k: f64, predict_prob:f64) -> f64 {
     (1. - delta_k)/(1. - predict_prob * delta_k) * predict_prob
+}
+
+fn normalize_weights(weights: &[LogWeight]) -> Vec<LogWeight> {
+    
+    let logsum = logsumexp(weights);
+
+    weights.iter().map(|lnw| {lnw - logsum}).collect()
+
+}
+
+fn normalize_particle_weights(particles: &[Particle]) -> Vec<Particle> {
+
+    // Collect the weights 
+    let weights = particles.iter().map(|p| p.0).collect_vec(); 
+    let normalized_weights = normalize_weights(&weights);
+
+    normalized_weights.iter().zip(particles.iter()).map(|(nw, p)| {
+        (*nw, p.1.clone())
+    }).collect_vec()
+
+}
+
+fn sysresample<R: Rng + ?Sized>(particles: &[Particle], n: usize, rng:  &mut R) -> Vec<Particle>
+{
+    let u = rng.sample(Uniform::new(0.0, 1.0));
+    sysresample_deterministic(particles, n, u)
+}
+
+fn sysresample_deterministic(particles: &[Particle], n: usize, u_tilde: f64) -> Vec<Particle> {
+    
+    // Clone the particles. 
+    let mut particles: Vec<Particle> = particles.to_owned(); 
+
+    // Sort em
+    particles.sort_by(|a, b| {
+        let va = a.0; 
+        let vb = b.0; 
+        va.partial_cmp(&vb)
+            .expect(format!("Cannot sort the particles, due to weight a: {va} is not comparable to b: {vb}").as_str())
+    });
+        
+    particles.iter().for_each(|p| {dbg!(&p.0.exp());} );
+        
+    // Create the cumulative distribution function
+    let f = particles.iter().map(|p| p.0.exp()).scan(0.0, |state, x|{
+        *state += x; 
+
+        Some(*state)
+    }).collect_vec();
+    dbg!(&f);
+    
+    // This returns the index of uk
+    let f_inv = |u: f64| {
+        // u goes between 0. and 1. What particle does this correspond to? 
+        println!("=======");
+        dbg!(&u);
+        f.partition_point(|ff| (*ff < u))
+    };
+
+    let nf: f64 = n as f64;
+    if n < particles.len() {
+        let uks = (0..n).map(|k| ((k as f64) + u_tilde)/nf  ); 
+        
+        // Which bin does the uks end up in?
+        let indices = uks.map(|u| f_inv(u));
+
+        indices.clone();
+
+        // Create a vector of these particles, and return
+        return indices.map(|ii| particles[ii].clone()).collect_vec()
+    }
+
+    particles
+}
+
+fn set_logweights(particles: &[Particle], new_logweight: f64) -> Vec<Particle> {
+
+    particles.iter().map(|(w, s)| {
+        (new_logweight, s.clone())
+    }).collect()
+
 }
 
 fn predict_particle_weights(
@@ -169,6 +324,7 @@ impl<Motion> BerPFDetections<Motion> {
 #[cfg(test)]
 mod tests {
     use nalgebra::DMatrix;
+    use statrs::assert_almost_eq;
     use statrs::distribution::{MultivariateNormal};
     use rand::distributions::Distribution; 
     use rand::thread_rng; 
@@ -335,6 +491,113 @@ mod tests {
     #[test]
     fn test_weight_update() {
         
+    
+        
+        let particles = Surviving(vec![(0.8_f64.ln(), State::from_vec(vec![-1.0])), (0.2_f64.ln(), State::from_vec(vec![3.0]))]);
+
+        let measurements = vec![State::from_vec(vec![1.0]), State::from_vec(vec![3.0])];
+
+        // Worlds most simple likelihood function for testing
+        let log_likelihood_fn: &dyn Fn(&State, &State) -> f64 = & |z, x| {
+            let r:DVector<f64> = (z - x);
+            println!("{}",r);
+            r[0]
+        };
+
+        let clutter_lnpdf = |z: &State| {
+            0.01
+        };
+        let lambda: f64 = 3.0; 
+
+        let pd = 0.9;
+        let expected_w0 = (1.0 - pd + pd * ( 
+            (log_likelihood_fn(&measurements[0], &particles[0].1) -  lambda.ln() - clutter_lnpdf(&measurements[0]) ).exp() +
+            (log_likelihood_fn(&measurements[1], &particles[0].1) -  lambda.ln() - clutter_lnpdf(&measurements[1]) ).exp()
+        )) * particles[0].0.exp();
+
+        let expected_w1= (1.0 - pd + pd * ( 
+            (log_likelihood_fn(&measurements[0], &particles[1].1) -  lambda.ln() - clutter_lnpdf(&measurements[0]) ).exp() +
+            (log_likelihood_fn(&measurements[1], &particles[1].1) -  lambda.ln() - clutter_lnpdf(&measurements[1]) ).exp()
+        )) * particles[1].0.exp();
+        
+
+        let expected_inner0 =(
+            logsumexp(&[(log_likelihood_fn(&measurements[0], &particles[0].1) -  lambda.ln() - clutter_lnpdf(&measurements[0]) ),
+            (log_likelihood_fn(&measurements[1], &particles[0].1) -  lambda.ln() - clutter_lnpdf(&measurements[1]) )]).exp()
+        );
+        
+        // Calculated by hand to be 20.456. 
+        dbg!(&expected_inner0);
+        assert_eq!(weight_update_single_particle_part(&particles[0], &measurements, &log_likelihood_fn, lambda.ln(), &clutter_lnpdf).exp(), expected_inner0);
+        
+        // Check that the weight update is correct for all of them. 
+        // Some floating point inaccurracies. Need to use assert_almost_eq, 
+        // which cannot compare vectors. Thus this whole iter zip shebacle. 
+        
+        // Calculated by hand to be 14.808
+        dbg!(expected_w0);
+        (vec![expected_w0, expected_w1])
+        .iter().zip( 
+        (weight_update(
+            &particles.as_ref().0, &measurements, pd, 
+            lambda, &log_likelihood_fn, 
+            &clutter_lnpdf
+        ).iter().map(|p| p.0.exp()))).for_each(|(expected, is)|{
+
+            assert_almost_eq!(*expected, is, 10. * statrs::prec::DEFAULT_F64_ACC)
+        });
+        
+    }
+    
+    #[test]
+    fn test_normalize_weights() {
+        assert_eq!(
+            normalize_weights(&[4.0_f64.ln(), 1.0_f64.ln()]),
+            vec![0.8_f64.ln(), 0.2_f64.ln()]
+        );
     }
 
+    #[test]
+    fn test_sysresample_deterministic() {
+        
+        let particles = vec![
+            (0.1_f64.ln(), State::from_vec(vec![0.0])), 
+            (0.15_f64.ln(), State::from_vec(vec![1.0])),
+            (0.2_f64.ln(), State::from_vec(vec![2.0])),
+            (0.55_f64.ln(), State::from_vec(vec![3.0])),
+        ];
+
+        let particles = normalize_particle_weights(&particles);
+
+        let u = 0.0;
+        
+        assert_eq!(sysresample_deterministic(&particles, 1, u)[0].1, State::from_vec(vec![0.0]));
+        assert_eq!(sysresample_deterministic(&particles, 1, 0.05)[0].1, State::from_vec(vec![0.0]));
+        assert_eq!(sysresample_deterministic(&particles, 1, 0.15)[0].1, State::from_vec(vec![1.0]));
+        assert_eq!(sysresample_deterministic(&particles, 1, 0.3)[0].1, State::from_vec(vec![2.0]));
+        assert_eq!(sysresample_deterministic(&particles, 1, 0.5)[0].1, State::from_vec(vec![3.0]));
+        assert_eq!(sysresample_deterministic(&particles, 1, 0.475)[0].1, State::from_vec(vec![3.0]));
+        assert_eq!(sysresample_deterministic(&particles, 2, 0.89).iter().map(|p| p.1.clone()).collect_vec(), vec![State::from_vec(vec![2.0]), State::from_vec(vec![3.0])]);
+        assert_eq!(sysresample_deterministic(&particles, 0, 0.89).iter().map(|p| p.1.clone()).collect_vec().len(), 0);
+        assert_eq!(sysresample_deterministic(&particles, 5, 0.89).iter().map(|p| p.1.clone()).collect_vec(), particles.iter().map(|p| p.1.clone()).collect_vec());
+
+    }
+
+    #[test]
+    fn test_set_weights() {
+        let particles = vec![
+            (0.1_f64.ln(), State::from_vec(vec![0.0])), 
+            (0.15_f64.ln(), State::from_vec(vec![1.0])),
+            (0.2_f64.ln(), State::from_vec(vec![2.0])),
+            (0.55_f64.ln(), State::from_vec(vec![3.0])),
+        ];
+        
+        let new_weight = (1.0_f64/4.0_f64).ln();
+        let new_particles = set_logweights(&particles, new_weight);
+
+        for (w, _) in new_particles.iter() {
+            assert_eq!(w, &new_weight)
+        }
+
+    }
 }

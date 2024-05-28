@@ -18,3 +18,4 @@ nalgebra = "*"
 itertools = "*"
 num-traits = "*"
 rand = "*"
+

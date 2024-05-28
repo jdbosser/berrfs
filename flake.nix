@@ -64,6 +64,7 @@
 		    export PYTHONPATH=`pwd`/$VENV/${python.sitePackages}/:$PYTHONPATH
 		    ln -sf ${python}/lib/python3.10/site-packages/* ./.venv/lib/python3.10/site-packages
 		    #pip install -r requirements.txt
+		    mkdir -p .cargo 
 		  '';
 
         wheelTail =
@@ -169,6 +170,7 @@
 		pkgs.mkShell {
 			buildInputs = [pkgs.maturin python pkgs.glibc];
 			shellHook = shell_hook; 
+			PYO3_PYTHON = "${pythonEnv}/bin/python";
 		};
 
 	    devShells.python = pkgs.mkShell {

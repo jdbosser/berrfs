@@ -127,7 +127,7 @@ def track(detections, filter):
         print("py", k, filter.prob())
         # print(filter.weights())
 
-        yield det, filter.particles(), filter.weights()
+        yield det, filter.particles(), filter.weights(), filter.prob()
 
 def confidence_ellipse(mean, cov, n_std=3.0, facecolor='none', **kwargs):
     """
@@ -179,15 +179,16 @@ def confidence_ellipse(mean, cov, n_std=3.0, facecolor='none', **kwargs):
 
 def dets_and_gauss_to_plot(ax, dets_and_gauss): 
     
-    det, gausss, weights = dets_and_gauss
+    det, gausss, weights, prob = dets_and_gauss
     det = np.array(det)
     artists = []
-    if len(det) > 0 and det[0].shape[0]>0:
-        artists.append(ax.plot(det[:, 0], det[:, 1], marker = ".", linewidth = 0)[0])
     
-    # print(gausss) 
-    artists.append(ax.scatter(gausss[:, 0], gausss[:, 2], marker = ".", c = weights, cmap = "viridis"))
+    # print(gausss)
+    if len(weights) > 0:
+        artists.append(ax.scatter(gausss[:, 0], gausss[:, 2], marker = ".", alpha = prob, c = "black"))
 
+    if len(det) > 0 and det[0].shape[0]>0:
+        artists.append(ax.plot(det[:, 0], det[:, 1], marker = ".", linewidth = 0, c = "tab:orange")[0])
 
     
     return artists

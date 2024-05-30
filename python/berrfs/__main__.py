@@ -1,5 +1,5 @@
 
-from bergsf import example_setup_gc, example_setup_uc
+from berrsf import example_setup_gc, example_setup_uc
 import matplotlib.pyplot as plt
 import numpy as np
 

@@ -1,7 +1,7 @@
 {lib, buildPythonPackage, pytestCheckHook, numpy, matplotlib, pythonOlder, rustPlatform, maturin}:
 
 buildPythonPackage rec {
-	pname = "bergsf";
+	pname = "berrfs";
 	format = "pyproject";
 	version = "0.1.0";
 	cargoDeps = rustPlatform.importCargoLock {

@@ -22,7 +22,7 @@ fn sum_as_string(a: usize, b: usize) -> PyResult<String> {
 
 /// A Python module implemented in Rust.
 #[pymodule]
-fn bergsf(_py: Python, m: &PyModule) -> PyResult<()> {
+fn berrfs(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sum_as_string, m)?)?;
     m.add_class::<Number>()?; 
     m.add_class::<PyBerGSFGaussianClutter>()?; 

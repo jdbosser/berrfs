@@ -1,4 +1,4 @@
-from .bergsf import *
+from .berrfs import *
 from .etete import a_fun
 from dataclasses import dataclass
 import numpy as np
@@ -60,6 +60,6 @@ def example_setup_uc():
 
 example_setup = example_setup_uc
 
-__doc__ = bergsf.__doc__
-if hasattr(bergsf, "__all__"):
-    __all__ = bergsf.__all__
+__doc__ = berrfs.__doc__
+if hasattr(berrfs, "__all__"):
+    __all__ = berrfs.__all__

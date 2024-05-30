@@ -109,7 +109,7 @@ def animate_detections(detections_over_time):
 
 def setup_filter(): 
 
-    from bergsf import BerPFDetections
+    from berrfs import BerPFDetections
     tracker = BerPFDetections(f, g, q, h, r, llambda, 1000, 1000, [(-100.0, 100.0), (-math.sqrt(0.2), math.sqrt(0.2)), (-100.0, 100.), (-math.sqrt(0.2), math.sqrt(0.2))], pb, ps, pd)
     return tracker 
 

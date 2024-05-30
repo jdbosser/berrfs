@@ -33,7 +33,7 @@ and measurement updates
 ```python
 b.update([np.array([1.]), np.array([2.])])
 ```
-Note that the measurement update performs a prediction step before applying the information from the filters. 
+Note that the measurement update performs a prediction step before applying the information from the measurements. 
 
 
 ## Release mode

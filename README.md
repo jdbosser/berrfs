@@ -1,6 +1,6 @@
-# BerGSF
+# BerRFS
 
-Stands for _Bernoulli Gaussian Sum Filter_. It is a rust implementation
+Stands for _Bernoulli Random Finite Set_. It is a rust implementation
 with python bindings of 
 [Ristic et.al. tutorial on Bernoulli filters](https://ba-ngu.vo-au.com/vo/RVVF_Bernoulli_TSP13.pdf).
 
@@ -19,12 +19,11 @@ Using maturin, development loop is quick. Change some rust or python code, rerun
 `maturin develop` and you should have an incremental debug build of the project. 
 
 Entering a python shell should now give you access to the 
-python module. An example instance of the BerGSF-struct 
-can be constructed using
+python module. An example instance of a BerRFS-struct (the Gaussian Sum Filter implementation) can be constructed using
 ```python
 # Python 
-import bergsf
-b = bergsf.example_setup()
+import berrfs
+b = berrfs.example_setup()
 ```
 on which you can perform prediction steps
 ```python

@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, ops::{Deref, DerefMut}};
 
 use itertools::Itertools;
-use nalgebra::DVector;
+use nalgebra::{DVector, DMatrix};
 use rand::{distributions::Uniform, Rng};
 
 #[derive(Debug, Clone)]
@@ -251,6 +251,40 @@ fn normalize_particle_weights(particles: &[Particle]) -> Vec<Particle> {
 
 }
 
+fn mean_particle(particles: &[Particle]) -> State {
+    let particles = normalize_particle_weights(particles);
+    particles.iter().map(|(lnw, s)| {
+        lnw.exp() * s
+    }).sum::<State>()
+}
+
+fn maxap_particle(particles: &[Particle]) -> State {
+
+    let particles = normalize_particle_weights(particles);
+    particles.iter().fold(&particles[0], |acc, p| {
+
+        if p.0 > acc.0 {
+            p
+        } else {
+            acc
+        }
+
+    }).1.clone()
+
+}
+
+fn cov_particles(particles: &[Particle]) -> DMatrix<f64> {
+
+    let particles = normalize_particle_weights(particles);
+    let mean = mean_particle(&particles);
+    particles.iter().map(|(lnw, s)| {
+        lnw.exp() * (s - &mean) * ((s - &mean).transpose())
+    }).sum::<DMatrix<f64>>()
+
+
+
+}
+
 fn sysresample<R: Rng + ?Sized>(particles: &[Particle], n: usize, rng:  &mut R) -> Vec<Particle>
 {
     let u = rng.sample(Uniform::new(0.0, 1.0));
@@ -355,6 +389,72 @@ where
     ClutterLnPDFS: ClutterLnPDF<Measurement> + Clone,
     BirthModelS: BirthModel<Measurement> + Clone,
 {
+    
+    pub fn mean(&self) -> State {
+        
+        let there_are_particles = self.particles_s.0.len() > 0;
+        match there_are_particles {
+            true => {
+                mean_particle(&self.particles_s.0)
+            },
+            false => {
+                self.model.birth_model
+                    .birth_model(&[], self.model.nborn, &mut rand::thread_rng())
+                    .into_iter()
+                    .sum::<State>() / (self.model.nborn as f64)
+            }
+        }
+    }
+    
+    pub fn map(&self) -> State {
+
+        let there_are_particles = self.particles_s.0.len() > 0;
+
+        match there_are_particles {
+            true => {
+                self.particles_s.0.iter().fold(&self.particles_s.0[0], |mut acc: &(f64, _), val|{
+                    if val.0 > acc.0 {
+                        acc = val
+                    }
+                    acc
+                }).clone().1
+            },
+            false => {
+                self.model.birth_model.birth_model(&[], 1, &mut rand::thread_rng())[0].clone()
+            },
+        }
+    }
+
+    pub fn cov(&self) -> DMatrix<f64> {
+
+        let mean = self.mean();
+
+        let there_are_particles = self.particles_s.0.len() > 0;
+
+        match there_are_particles {
+            true => {
+                
+                cov_particles(&self.particles_s.0)
+
+            },
+            false => {
+                
+                cov_particles(
+                    &self.model.birth_model.birth_model(
+                        &[], 
+                        self.model.nborn, 
+                        &mut rand::thread_rng())
+                    .into_iter()
+                    .map(|s|{
+                        (1.0 / (self.model.nborn as f64), s)
+                    })
+                    .collect_vec()
+                )
+            },
+        }
+
+    }
+
     pub fn measurement_update<R: Rng>(&self, measurements: &[Measurement], rng: &mut R) -> Self {
 
 
@@ -769,6 +869,48 @@ mod tests {
         for (w, _) in new_particles.iter() {
             assert_eq!(w, &new_weight)
         }
+    }
 
+    #[test]
+    fn test_mean_particle() {
+        let particles = vec![
+            (0.1_f64.ln(), State::from_vec(vec![0.0, 1.0])), 
+            (0.15_f64.ln(), State::from_vec(vec![1.0, -1.0])),
+            (0.2_f64.ln(), State::from_vec(vec![2.0, 2.2])),
+            (0.55_f64.ln(), State::from_vec(vec![3.0, -4.0])),
+        ];
+
+        let result = mean_particle(&particles); 
+        let expected = State::from_vec(vec![0.15*1.0 + 0.2*2.0 + 0.55*3.0, 0.1 * 1.0 + 0.15 * (-1.) + 0.2 * 2.2 + 0.55 * (-4.)]);
+
+        assert_almost_eq!(expected[0], result[0], 10. * statrs::prec::DEFAULT_F64_ACC);
+
+    }
+    #[test]
+    fn test_maxap_particle() {
+        let particles = vec![
+            (0.1_f64.ln(), State::from_vec(vec![0.0])), 
+            (0.15_f64.ln(), State::from_vec(vec![1.0])),
+            (0.2_f64.ln(), State::from_vec(vec![2.0])),
+            (0.55_f64.ln(), State::from_vec(vec![3.0])),
+        ];
+
+        let result = maxap_particle(&particles); 
+        let expected = State::from_vec(vec![3.0]);
+
+        assert_eq!(expected, result);
+    }
+    
+    #[test]
+    fn test_covariance(){
+        let particles = vec![
+            (0.25_f64.ln(), State::from_vec(vec![0.0, 0.0])), 
+            (0.25_f64.ln(), State::from_vec(vec![0.0, 1.0])),
+            (0.25_f64.ln(), State::from_vec(vec![1.0, 2.0])),
+            (0.25_f64.ln(), State::from_vec(vec![-1.0, 3.0])),
+        ];
+        
+        assert_eq!(cov_particles(&particles), DMatrix::from_vec(2, 2, vec![0.5, -0.25, -0.25, 1.25]))
+        
     }
 }

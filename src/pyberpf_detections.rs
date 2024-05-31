@@ -268,27 +268,31 @@ impl PyBerPFDetections {
 
     fn mean<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>>  {
         
-        let there_are_particles = self.filter.particles_s.0.len() > 0;
-
-        let array = match there_are_particles {
-            true => {
-                let v1 = self.filter.particles_s.0.iter().map(|(lnw, p)| {
-                    lnw.exp() * p 
-                }).sum::<State>(); 
-
-                Array1::from_vec(
-                    (v1 / (self.filter.particles_s.0.len() as f64))
-                    .data.as_vec().to_vec()
-                )
-            },
-            false => Array1::zeros([0]),
-        };
+        let dmat = self.filter.mean(); 
+        let array = dmat.data.as_vec().to_vec(); 
 
         array.to_pyarray_bound(py)
 
     }
 
-    
+    fn maxap<'py>(&self, py: Python<'py>)  -> Bound<'py, PyArray1<f64>> {
+        let dmat = self.filter.maxap(); 
+        let array = dmat.data.as_vec().to_vec(); 
 
+        array.to_pyarray_bound(py)
+    }
+
+    fn cov<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray2<f64>> {
+
+        let dmat = self.filter.cov(); 
+        let array = Array2::from_shape_vec(
+            dmat.shape(),
+            dmat.data.as_vec().to_vec()
+            )
+            .unwrap(); 
+
+        array.to_pyarray_bound(py)
+
+    }
     
 }

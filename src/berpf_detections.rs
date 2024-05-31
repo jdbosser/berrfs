@@ -406,7 +406,7 @@ where
         }
     }
     
-    pub fn map(&self) -> State {
+    pub fn maxap(&self) -> State {
 
         let there_are_particles = self.particles_s.0.len() > 0;
 

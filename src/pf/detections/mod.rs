@@ -4,6 +4,8 @@ use itertools::Itertools;
 use nalgebra::{DVector, DMatrix};
 use rand::{distributions::Uniform, Rng};
 
+pub mod pybindings;
+
 #[derive(Debug, Clone)]
 pub struct Model<Motion, LogLikelihood, Measurement, ClutterLnPDF, BirthModel>
 {
@@ -95,29 +97,7 @@ fn predict_particle_positions(
         .collect()
 }
 
-fn logsumexp(log_numbers: &[f64]) -> f64 {
-    let max: f64 = log_numbers
-        .iter()
-        .filter(|f| f.is_finite())
-        .fold(-f64::INFINITY, |a, b| a.max(*b)); 
-    
-
-    let result = {
-        match max {
-            f64::NEG_INFINITY => f64::NEG_INFINITY,
-            _ => {
-                let sum: f64 = log_numbers.iter().map(|f| {
-                    (f - max).exp()
-                 }).sum();
-
-                sum.ln() + max
-            }
-        }
-    };
-
-    result
-        
-}
+use crate::utils::logsumexp; 
 
 fn compute_delta_k<M>(i1: f64, lambda: f64, clutter_lnpdf: &dyn Fn(&M) -> f64, i2fun: &dyn Fn(&M) -> f64,  measurements: &[M] ) -> f64 {
     

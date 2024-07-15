@@ -8,7 +8,7 @@ use rand::{distributions::Uniform, rngs::{StdRng, ThreadRng}, Rng, SeedableRng};
 use numpy::{ndarray::{Array1, Array2, AssignElem}, IntoPyArray, PyArray1, PyArray2, PyArrayMethods, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods, ToPyArray};
 use statrs::distribution::{Continuous, MultivariateNormal, Normal}; 
 
-use crate::berpf_detections::{BerPFDetections, BirthModel, ClutterLnPDF, LogLikelihood, Model, Motion, State };
+use crate::pf::detections::{BerPFDetections, BirthModel, ClutterLnPDF, LogLikelihood, Model, Motion, State };
 
 // A static wrapper to make the BerPFDetections work in python. 
 // No generics allowed. Thus, the FnMut, Fn things are problematic. 

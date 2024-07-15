@@ -8,7 +8,7 @@ use rand::{distributions::Uniform, rngs::{StdRng, ThreadRng}, Rng, SeedableRng};
 use numpy::{ndarray::{Array1, Array2, AssignElem}, IntoPyArray, PyArray1, PyArray2, PyArrayMethods, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods, ToPyArray};
 use statrs::distribution::{Continuous, MultivariateNormal, Normal}; 
 
-use crate::pf::detections::{BerPFDetections, BirthModel, ClutterLnPDF, LogLikelihood, Model, Motion, State };
+use crate::pf::{detections::{BerPFDetections, BirthModel, ClutterLnPDF, LogLikelihood, Model, Motion, State }, LogLikelihoodRatio};
 
 // A static wrapper to make the BerPFDetections work in python. 
 // No generics allowed. Thus, the FnMut, Fn things are problematic. 
@@ -108,8 +108,8 @@ struct LogLikelihoodS {
     h: DMatrix<f64>,
     r: DMatrix<f64>
 }
-impl LogLikelihood<Measurement> for LogLikelihoodS {
-    fn loglikelihood(&self, measurement: &Measurement, state: &State) -> f64 {
+impl LogLikelihoodRatio<Measurement> for LogLikelihoodS {
+    fn loglik_ratio(&self, measurement: &Measurement, state: &State) -> f64 {
         let dist = MultivariateNormal::new((self.h.clone()*state).data.as_vec().to_vec(), self.r.data.as_vec().to_vec()).expect("Error in creating the log likelihood function");
         
         // println!("measurement: {}", measurement);

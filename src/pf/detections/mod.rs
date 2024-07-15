@@ -6,7 +6,7 @@ use rand::{distributions::Uniform, Rng};
 
 pub mod pybindings;
 
-use super::{cov_particles, mean_particle, normalize_particle_weights, normalize_weights, predict_particle_positions, predict_particle_weights, predict_prob, set_logweights, sysresample, BirthModel, LogLikelihood, Motion}; 
+use super::{cov_particles, mean_particle, normalize_particle_weights, normalize_weights, predict_particle_positions, predict_particle_weights, predict_prob, set_logweights, sysresample, BirthModel, LogLikelihood, LogLikelihoodRatio, Motion}; 
 
 #[derive(Debug, Clone)]
 pub struct Model<Motion, LogLikelihood, Measurement, ClutterLnPDF, BirthModel>
@@ -173,7 +173,7 @@ pub trait ClutterLnPDF<M> {
 impl<MotionS, LogLikelihoodS, Measurement: Clone, ClutterLnPDFS, BirthModelS> BerPFDetections<MotionS, LogLikelihoodS, Measurement, ClutterLnPDFS, BirthModelS> 
 where
     MotionS: Motion + Clone,
-    LogLikelihoodS: LogLikelihood<Measurement> + Clone, 
+    LogLikelihoodS: LogLikelihoodRatio<Measurement> + Clone, 
     ClutterLnPDFS: ClutterLnPDF<Measurement> + Clone,
     BirthModelS: BirthModel<Measurement> + Clone,
 {
@@ -247,7 +247,7 @@ where
 
 
         let loglikelihood = |z: &Measurement, state: &State| {
-            self.model.loglikelihood.loglikelihood(z, state)
+            self.model.loglikelihood.loglik_ratio(z, state)
         };
         let clutter_lnpdf = |z: &Measurement| {
             self.model.clutter_lnpdf.clutter_lnpdf(z)
@@ -286,7 +286,7 @@ where
             approximate_i2(
                 z, self.model.pd, 
                 predicted_particles.0.as_ref(), predicted_particles.1.as_ref(), 
-                &(|z: &Measurement, state: &State| {self.model.loglikelihood.loglikelihood(z, state)})
+                &(|z: &Measurement, state: &State| {self.model.loglikelihood.loglik_ratio(z, state)})
             )
         };
         

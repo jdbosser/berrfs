@@ -5,9 +5,9 @@ use pyo3::prelude::*;
 pub use gsf::pybindings::gaussian_clutter::*; 
 pub use gsf::pybindings::uniform_clutter::*; 
 
-mod utils; 
-mod pf; 
-mod gsf; 
+pub mod utils; 
+pub mod pf; 
+pub mod gsf; 
 
 /// A Python module implemented in Rust.
 #[pymodule]

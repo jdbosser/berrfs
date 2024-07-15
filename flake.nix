@@ -95,10 +95,17 @@
     		lockFile = ./Cargo.lock;
   		};
 	      # build-system = [pgs.maturin];
-	      propagetedBuildInputs = [pkgs.maturin];
+	      propagetedBuildInputs = [
+	      	pkgs.maturin
+		    pkgs.python3Packages.numpy
+	            pkgs.python3Packages.matplotlib
+		
+		];
 		 nativeBuildInputs = with pkgs.rustPlatform; [
 		    cargoSetupHook
 		    maturinBuildHook
+		    pkgs.python3Packages.numpy
+	            pkgs.python3Packages.matplotlib
 		  ];
               #src = "${crateWheel}/${wheelName}";
               src = ./.;

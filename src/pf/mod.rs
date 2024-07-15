@@ -19,8 +19,20 @@ pub trait Motion {
     fn motion<R: Rng>(&self, state: &State, rng: &mut R) -> State; 
 }
 pub trait LogLikelihood<M> {
-    fn loglikelihood(&self, measurement: &M, state: &State) -> f64; 
+    fn loglikt(&self, measurement: &M, state: &State) -> f64; 
+    fn logliknt(&self, measurement: &M) -> f64; 
 }
+
+pub trait LogLikelihoodRatio<M> {
+    fn loglik_ratio(&self, measurement: &M, state: &State) -> f64; 
+}
+
+impl<T: LogLikelihood<M>, M> LogLikelihoodRatio<M> for T {
+    fn loglik_ratio(&self, measurement: &M, state: &State) -> f64 {
+        self.loglikt(measurement, state) - self.logliknt(measurement)
+    }
+}
+
 pub trait BirthModel<M> {
     fn birth_model<R: Rng>(&self, measurements: &[M], size: usize, rng: &mut R) -> Vec<State>; 
 }
@@ -58,12 +70,12 @@ impl<T> Deref for Born<T> {
 }
 
 
-fn predict_prob(prob: f64, pb: f64, ps: f64) -> f64 {
+pub fn predict_prob(prob: f64, pb: f64, ps: f64) -> f64 {
     pb * ( 1. - prob) + ps * prob
 }
 
 
-fn predict_particle_positions(
+pub fn predict_particle_positions(
     particles: &[Particle], 
     motion: &mut dyn FnMut(&State) -> State // FnMut since it can contain a mutating rng. 
     ) -> Vec<Particle> {
@@ -75,7 +87,7 @@ fn predict_particle_positions(
 }
 
 
-fn predict_particle_weights(
+pub fn predict_particle_weights(
     surviving_particles: Surviving<&[Particle]>, 
     born_particles: Born<&[Particle]>, 
     prob: f64, pb: f64, ps: f64) -> (Surviving<Vec<Particle>>, Born<Vec<Particle>>) {
@@ -102,7 +114,7 @@ fn predict_particle_weights(
 
 
 
-fn set_logweights(particles: &[Particle], new_logweight: f64) -> Vec<Particle> {
+pub fn set_logweights(particles: &[Particle], new_logweight: f64) -> Vec<Particle> {
 
     particles.iter().map(|(w, s)| {
         (new_logweight, s.clone())
@@ -111,7 +123,7 @@ fn set_logweights(particles: &[Particle], new_logweight: f64) -> Vec<Particle> {
 }
 
 
-fn normalize_weights(weights: &[LogWeight]) -> Vec<LogWeight> {
+pub fn normalize_weights(weights: &[LogWeight]) -> Vec<LogWeight> {
     
     let logsum = logsumexp(weights);
 
@@ -121,7 +133,7 @@ fn normalize_weights(weights: &[LogWeight]) -> Vec<LogWeight> {
 
 
 
-fn normalize_particle_weights(particles: &[Particle]) -> Vec<Particle> {
+pub fn normalize_particle_weights(particles: &[Particle]) -> Vec<Particle> {
 
     // Collect the weights 
     let weights = particles.iter().map(|p| p.0).collect_vec(); 
@@ -134,7 +146,7 @@ fn normalize_particle_weights(particles: &[Particle]) -> Vec<Particle> {
 }
 
 
-fn sysresample_deterministic(particles: &[Particle], n: usize, u_tilde: f64) -> Vec<Particle> {
+pub fn sysresample_deterministic(particles: &[Particle], n: usize, u_tilde: f64) -> Vec<Particle> {
     
     // Clone the particles. 
     let mut particles: Vec<Particle> = particles.to_owned(); 
@@ -180,7 +192,7 @@ fn sysresample_deterministic(particles: &[Particle], n: usize, u_tilde: f64) -> 
 }
 
 
-fn sysresample<R: Rng + ?Sized>(particles: &[Particle], n: usize, rng:  &mut R) -> Vec<Particle>
+pub fn sysresample<R: Rng + ?Sized>(particles: &[Particle], n: usize, rng:  &mut R) -> Vec<Particle>
 {
     let u = rng.sample(Uniform::new(0.0, 1.0));
     sysresample_deterministic(particles, n, u)
@@ -188,7 +200,7 @@ fn sysresample<R: Rng + ?Sized>(particles: &[Particle], n: usize, rng:  &mut R) 
 
 
 
-fn mean_particle(particles: &[Particle]) -> State {
+pub fn mean_particle(particles: &[Particle]) -> State {
     let particles = normalize_particle_weights(particles);
     particles.iter().map(|(lnw, s)| {
         lnw.exp() * s
@@ -196,7 +208,7 @@ fn mean_particle(particles: &[Particle]) -> State {
 }
 
 
-fn maxap_particle(particles: &[Particle]) -> State {
+pub fn maxap_particle(particles: &[Particle]) -> State {
 
     let particles = normalize_particle_weights(particles);
     particles.iter().fold(&particles[0], |acc, p| {
@@ -211,7 +223,7 @@ fn maxap_particle(particles: &[Particle]) -> State {
 
 }
 
-fn cov_particles(particles: &[Particle]) -> DMatrix<f64> {
+pub fn cov_particles(particles: &[Particle]) -> DMatrix<f64> {
 
     let particles = normalize_particle_weights(particles);
     let mean = mean_particle(&particles);
@@ -403,8 +415,6 @@ mod tests {
         assert_almost_eq!(expected[0], result[0], 10. * statrs::prec::DEFAULT_F64_ACC);
 
     }
-
-
 
     #[test]
     fn test_maxap_particle() {

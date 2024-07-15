@@ -17,6 +17,15 @@ maturin develop
 This will construct a virtual environment in your current directory at `.venv`. 
 Using maturin, development loop is quick. Change some rust or python code, rerun 
 `maturin develop` and you should have an incremental debug build of the project. 
+Running `maturin develop --release` will give that same environment, but 
+the rust library is compiled in release mode, i.e., speed! 
+
+After running maturin develop, you may see a target tracking example 
+using the particle-filter-based bernoulli random finite set on detection measurements
+using
+```
+python -m berrfs.example
+```
 
 Entering a python shell should now give you access to the 
 python module. An example instance of a BerRFS-struct (the Gaussian Sum Filter implementation) can be constructed using

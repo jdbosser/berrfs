@@ -6,7 +6,7 @@ use rand::{distributions::Uniform, Rng};
 
 pub mod pybindings;
 
-use super::{cov_particles, mean_particle, normalize_particle_weights, normalize_weights, predict_particle_positions, predict_particle_weights, predict_prob, set_logweights, sysresample, BirthModel, LogLikelihood, LogLikelihoodRatio, Motion}; 
+use super::{cov_particles, mean_particle, normalize_particle_weights, normalize_logweights, predict_particle_positions, predict_particle_weights, predict_prob, set_logweights, sysresample, BirthModel, LogLikelihood, LogLikelihoodRatio, Motion}; 
 
 #[derive(Debug, Clone)]
 pub struct Model<Motion, LogLikelihood, Measurement, ClutterLnPDF, BirthModel>
@@ -175,7 +175,7 @@ where
     MotionS: Motion + Clone,
     LogLikelihoodS: LogLikelihoodRatio<Measurement> + Clone, 
     ClutterLnPDFS: ClutterLnPDF<Measurement> + Clone,
-    BirthModelS: BirthModel<Measurement> + Clone,
+    BirthModelS: BirthModel<Vec<Measurement>> + Clone,
 {
     
     pub fn mean(&self) -> State {
@@ -187,7 +187,7 @@ where
             },
             false => {
                 self.model.birth_model
-                    .birth_model(&[], self.model.nborn, &mut rand::thread_rng())
+                    .birth_model(&vec![], self.model.nborn, &mut rand::thread_rng())
                     .into_iter()
                     .sum::<State>() / (self.model.nborn as f64)
             }
@@ -208,7 +208,7 @@ where
                 }).clone().1
             },
             false => {
-                self.model.birth_model.birth_model(&[], 1, &mut rand::thread_rng())[0].clone()
+                self.model.birth_model.birth_model(&vec![], 1, &mut rand::thread_rng())[0].clone()
             },
         }
     }
@@ -229,7 +229,7 @@ where
                 
                 cov_particles(
                     &self.model.birth_model.birth_model(
-                        &[], 
+                        &vec![], 
                         self.model.nborn, 
                         &mut rand::thread_rng())
                     .into_iter()
@@ -243,7 +243,7 @@ where
 
     }
 
-    pub fn measurement_update<R: Rng>(&self, measurements: &[Measurement], rng: &mut R) -> Self {
+    pub fn measurement_update<R: Rng>(&self, measurements: &Vec<Measurement>, rng: &mut R) -> Self {
 
 
         let loglikelihood = |z: &Measurement, state: &State| {
@@ -341,7 +341,7 @@ where
         let surv_weight = (1.0 / (self.model.nsurv as f64) ).ln(); 
         let survivng_particles = Surviving(set_logweights(&survivng_particles, surv_weight));
         
-        let mut wrapped_birth_model = |measurements: &[Measurement], nbirth: usize| {
+        let mut wrapped_birth_model = |measurements: &Vec<Measurement>, nbirth: usize| {
             self.model.birth_model.birth_model(measurements, nbirth, rng)
         };
 

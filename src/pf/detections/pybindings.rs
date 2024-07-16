@@ -54,8 +54,8 @@ impl Motion for MotionS {
 struct BirthModelS {
     birth_uniform_area: Vec<(f64, f64)>
 }
-impl BirthModel<DVector<f64>> for BirthModelS {
-    fn birth_model<R: Rng>(&self, measurements: &[DVector<f64>], size: usize, rng: &mut R) -> Vec<State> {
+impl BirthModel<Vec<DVector<f64>>> for BirthModelS {
+    fn birth_model<R: Rng>(&self, measurements: &Vec<DVector<f64>>, size: usize, rng: &mut R) -> Vec<State> {
 
         /*
         if measurements.len() < 0 {
@@ -203,7 +203,7 @@ impl PyBerPFDetections {
             })
         };
 
-        let rrf = rr.clone().filter.measurement_update(&[], &mut rng);
+        let rrf = rr.clone().filter.measurement_update(&vec![], &mut rng);
         rr
         
     }

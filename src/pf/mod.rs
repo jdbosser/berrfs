@@ -34,7 +34,7 @@ impl<T: LogLikelihood<M>, M> LogLikelihoodRatio<M> for T {
 }
 
 pub trait BirthModel<M> {
-    fn birth_model<R: Rng>(&self, measurements: &[M], size: usize, rng: &mut R) -> Vec<State>; 
+    fn birth_model<R: Rng>(&self, measurement: &M, size: usize, rng: &mut R) -> Vec<State>; 
 }
 
 // Marker structs
@@ -123,7 +123,7 @@ pub fn set_logweights(particles: &[Particle], new_logweight: f64) -> Vec<Particl
 }
 
 
-pub fn normalize_weights(weights: &[LogWeight]) -> Vec<LogWeight> {
+pub fn normalize_logweights(weights: &[LogWeight]) -> Vec<LogWeight> {
     
     let logsum = logsumexp(weights);
 
@@ -137,7 +137,7 @@ pub fn normalize_particle_weights(particles: &[Particle]) -> Vec<Particle> {
 
     // Collect the weights 
     let weights = particles.iter().map(|p| p.0).collect_vec(); 
-    let normalized_weights = normalize_weights(&weights);
+    let normalized_weights = normalize_logweights(&weights);
 
     normalized_weights.iter().zip(particles.iter()).map(|(nw, p)| {
         (*nw, p.1.clone())
@@ -336,7 +336,7 @@ mod tests {
     #[test]
     fn test_normalize_weights() {
         assert_eq!(
-            normalize_weights(&[4.0_f64.ln(), 1.0_f64.ln()]),
+            normalize_logweights(&[4.0_f64.ln(), 1.0_f64.ln()]),
             vec![0.8_f64.ln(), 0.2_f64.ln()]
         );
     }

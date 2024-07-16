@@ -1,10 +1,11 @@
 use std::marker::PhantomData;
 
+use itertools::Itertools;
 use rand::Rng;
 
-use crate::{pf::{predict_particle_weights, State}, utils::logsumexp};
+use crate::{pf::{predict_particle_weights, sysresample, State}, utils::logsumexp};
 
-use super::{BirthModel, Born, LogLikelihood, LogLikelihoodRatio, Motion, Particle, Surviving, predict_prob, predict_particle_positions};
+use super::{normalize_logweights, predict_particle_positions, predict_prob, set_logweights, BirthModel, Born, LogLikelihood, LogLikelihoodRatio, Motion, Particle, Surviving};
 
 #[derive(Debug, Clone)]
 pub struct Model<Motion, LogLikelihood, Measurement, BirthModel>
@@ -44,11 +45,49 @@ impl<Mo, Ll, Ms, Bm> BerPFIntensities<Mo, Ll, Ms, Bm> {
 
 }
 
+fn update_q(predicted_q: f64, ik: f64) -> f64 {
+
+    if predicted_q == 1.0 {
+        
+        return 1.0
+
+    }
+    predicted_q * ik / (1. - predicted_q + predicted_q * ik)
+}
+
+fn get_ik<LikFn>(particles: &[Particle], loglik_rat_fn: &LikFn) -> f64
+where 
+LikFn: Fn(&State) -> f64
+{
+    let values = particles.iter().map(|(w, p)| {
+ 
+        w + loglik_rat_fn(p)
+
+    }).collect_vec(); 
+
+    logsumexp(&values).exp()
+}
+
+fn weight_update<LogLikT>(particles: &[Particle], loglikt: &LogLikT) -> Vec<Particle> 
+where LogLikT: Fn(&State) -> f64 {
+    
+    let new_weights: Vec<f64> = particles.iter().map(|(lnw, s)| {
+        lnw + loglikt(s)
+    }).collect();  
+
+    let new_weights = normalize_logweights(&new_weights); 
+    
+    particles.iter().zip(new_weights).map(|((_, s), new_lnw)| {
+        (new_lnw, s.clone())
+    }).collect()
+
+}
 
 impl<Mo, Ll, Ms, Bm> BerPFIntensities<Mo, Ll, Ms, Bm> where 
 Mo: Motion + Clone, 
 Ll: LogLikelihood<Ms> + Clone, 
-Bm: BirthModel<Ms> + Clone
+Bm: BirthModel<Ms> + Clone, 
+Ms: Clone
 {
     pub fn measurement_update<R: Rng>(&self, measurement: &Ms, rng: &mut R, t: &impl LogLikelihood<Ms>) -> Self {
 
@@ -58,6 +97,13 @@ Bm: BirthModel<Ms> + Clone
         let mut wrapped_motion = |state: &State| {
             self.model.motion.motion(state, rng)
         };
+        
+        // Construct a function to evaluate the fitness of the particle. There 
+        // is only one measurement, so this is a nice shortcut
+        let loglikrat_particle = |state: &State|  {
+            self.model.loglikelihood.loglikt(measurement, state) 
+            - self.model.loglikelihood.logliknt(measurement)
+        }; 
 
 
         // Steps from the algorithm
@@ -94,44 +140,141 @@ Bm: BirthModel<Ms> + Clone
             .collect();  
 
         // Approximate integral I_k using (83)
-        // TODO: Write a test
-        let ik = { // Sprinkling some interior mutability here for speedup.
-
-            let mut maxval = f64::NEG_INFINITY; 
-            
-            let sum_components: Vec<_> = predicted_particles.0.iter()
-                .chain(predicted_particles.1.iter())
-                .map(|(logweight, particle)| {
-
-                    let loglikt = self.model.loglikelihood.loglikt(measurement, particle);
-                    let loglikrat = loglikt - logliknt; 
-
-                    let val = logweight + loglikrat;
-                    val
-
-                }).collect();
-            
-            logsumexp(&sum_components).exp()
-        };
+        // TODO: Can probably evaluate this without calling clone, for a speedup. 
+        let all_particles: Vec<Particle> = [
+            predicted_particles.0.0.clone(), 
+            predicted_particles.1.0.clone()
+        ].concat();
+        let ik = get_ik(&all_particles, &loglikrat_particle); 
         
         // Update existance probability
-        // TODO: Write a test
-        let updated_q = predicted_q * ik / (1. - predicted_q + predicted_q * ik); 
+        let updated_q = update_q(predicted_q, ik); 
 
         // For every particle, update the weights based on the likelihood that there is a target. 
-        
         // Normalize the weights. 
+        // Note: The weight_update function also normalizes the weights. 
+        let f = |particle: &State| {
+            self.model.loglikelihood.loglikt(measurement, particle)
+        }; 
+        let all_particles = weight_update(&all_particles, &f);
 
         // Sysresample to take a set of surviving particles
         
+        let surviving_particles = sysresample(
+            &all_particles, self.model.nsurv, rng
+        );
+
         // Set the weights equal among the survivors. 
+        let surviving_particles = set_logweights(
+            &surviving_particles, (1.0_f64 / (self.model.nsurv as f64) ).ln()
+        );
         
         // Draw a set of birth particles.
-        
+        let birth_states = self.model.birth_model.birth_model(
+            measurement, self.model.nborn, rng
+        );
+
         // Set the weights equal for all the birth particles. 
+        let birth_particles = birth_states.into_iter().map(|state| {
+            ((1.0_f64 / (self.model.nborn as f64)).ln(), state)
+        }).collect_vec();
         
         // Output a new self. 
+        Self {
+            model: self.model.clone(), 
+            particles_b: Born(birth_particles), 
+            particles_s: Surviving(surviving_particles),
+            q: updated_q
+        }
 
-        todo!()
     }
+}
+
+#[cfg(test)]
+mod tests {
+    
+    use statrs::assert_almost_eq;
+
+    use super::*; 
+
+    #[test]
+    fn test_update_q() {
+
+        // Creating triplets of inputs, and expected result
+        let data = [
+            ((0.0, 0.0), 0.0),
+            ((1.0, 0.1), 1.0),
+            ((1.0, 0.1), 1.0),
+            ((1.0, 0.2), 1.0),
+            ((1.0, 0.0), 1.0),
+            ((0.5, 3.0), (1.5/2.))
+        ];
+
+        for d in data.iter() {
+            assert_eq!(update_q(d.0.0, d.0.1), d.1)
+        }
+
+    }
+
+    #[test]
+    fn test_ik() {
+        let loglikrat_fn = |state: &State| {
+            return state[0] 
+        }; 
+
+        let particle_tests: Vec<Particle> = vec![
+            (0.5_f64.ln(), State::from_vec(vec![-1.])),
+            (0.5_f64.ln(), State::from_vec(vec![-10.])),
+        ]; 
+        
+        let expected = 0.5 * 1./(1.0_f64.exp()) + 0.5 * 1./(10.0_f64.exp()); 
+
+        assert_eq!(expected, get_ik(&particle_tests, &loglikrat_fn));
+
+        let particle_tests: Vec<Particle> = vec![
+            (0.5_f64.ln(), State::from_vec(vec![1.])),
+            (0.5_f64.ln(), State::from_vec(vec![10.])),
+        ]; 
+        
+        let expected = 0.5 * (1.0_f64.exp()) + 0.5 * (10.0_f64.exp());
+
+        assert_almost_eq!(expected, get_ik(&particle_tests, &loglikrat_fn),10.0_f64.powi(-11));  
+
+        let particle_tests: Vec<Particle> = vec![
+        ]; 
+        
+        let expected = 0.0_f64;
+
+        assert_eq!(expected, get_ik(&particle_tests, &loglikrat_fn));  
+    }
+
+    #[test]
+    fn test_weight_update() {
+
+        let loglikt_fn = |state: &State| {
+            return state[0] 
+        }; 
+
+        let particle_tests: Vec<Particle> = vec![
+            (0.5_f64.ln(), State::from_vec(vec![-1.])),
+            (0.5_f64.ln(), State::from_vec(vec![-5.])),
+        ]; 
+        
+        
+        let total = (1.0_f64/5.0_f64.exp() + (-1.0_f64).exp()); 
+
+        let expected: Vec<Particle> = vec![
+            (((-1.0_f64).exp() / total).ln(), State::from_vec(vec![-1.])),
+            (((-5.0_f64).exp() / total).ln(), State::from_vec(vec![-5.])),
+        ]; 
+
+
+        expected.iter().zip(weight_update(&particle_tests, &loglikt_fn).iter())
+            .for_each(|(ep, rp)|{
+                assert_almost_eq!(ep.0, rp.0, 10.0_f64.powi(-11))
+            })
+
+
+    }
+
 }

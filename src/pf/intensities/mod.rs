@@ -7,6 +7,8 @@ use crate::{pf::{predict_particle_weights, sysresample, State}, utils::logsumexp
 
 use super::{normalize_logweights, predict_particle_positions, predict_prob, set_logweights, BirthModel, Born, LogLikelihood, LogLikelihoodRatio, Motion, Particle, Surviving};
 
+pub mod pybindings;
+
 #[derive(Debug, Clone)]
 pub struct Model<Motion, LogLikelihood, Measurement, BirthModel>
 {

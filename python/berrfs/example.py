@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+import matplotlib as mpl
 from matplotlib.patches import Ellipse
 import matplotlib.transforms as transforms
 import math
@@ -182,10 +183,13 @@ def dets_and_gauss_to_plot(ax, dets_and_gauss):
     det, gausss, weights, prob = dets_and_gauss
     det = np.array(det)
     artists = []
+
+    cmap = mpl.colormaps["viridis_r"]
     
     # print(gausss)
     if len(weights) > 0:
-        artists.append(ax.scatter(gausss[:, 0], gausss[:, 2], marker = ".", alpha = prob, c = "black"))
+        p, = ax.plot(gausss[:, 0], gausss[:, 2], linewidth = 0, alpha = 0.05,  marker = ".", c = cmap(prob))
+        artists.append(p)
 
     if len(det) > 0 and det[0].shape[0]>0:
         artists.append(ax.plot(det[:, 0], det[:, 1], marker = ".", linewidth = 0, c = "tab:orange")[0])
@@ -203,7 +207,6 @@ if __name__ == "__main__":
     from matplotlib.animation import ArtistAnimation
 
     probs = [t[2] for t in track_over_time]
-    breakpoint()
 
     artists = [dets_and_gauss_to_plot(ax, d) for d in track_over_time]
     anim = ArtistAnimation(fig, artists)

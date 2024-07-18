@@ -3,6 +3,8 @@ use std::{marker::PhantomData, ops::{Deref, DerefMut}};
 use itertools::Itertools;
 use nalgebra::{DVector, DMatrix};
 use rand::{distributions::Uniform, Rng};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rayon::prelude::*; 
 
 pub mod pybindings;
 
@@ -73,9 +75,9 @@ fn approximate_i1(pd: f64, particles_s: Surviving<&[Particle]>, particles_b: Bor
         }
     };
     
-    logsumexp(&all_particles.iter().map(|(lnw, _)| {
+    logsumexp(&all_particles.par_iter().map(|(lnw, _)| {
         lnw + lnpd 
-    }).collect_vec())
+    }).collect::<Vec<_>>())
 }
 
 /// Computes the sum in equation (87)
@@ -96,19 +98,19 @@ fn weight_update_single_particle_part<M>(
     logsumexp(&logs)
 }
 
-fn weight_update_mut<'a, M>(
+fn weight_update_mut<'a, M: Sync>(
         particles: &'a mut [&'a mut Particle], 
         measurements: &[M], 
         pd: f64, 
         lambda: f64, 
-        log_likelihood_fn: &dyn Fn(&M, &State) -> f64, 
-        clutter_lnpdf: &dyn Fn(&M) -> f64, 
+        log_likelihood_fn: &(dyn Fn(&M, &State) -> f64 + Send + Sync), 
+        clutter_lnpdf: &(dyn Fn(&M) -> f64 + Send + Sync), 
     ) -> &'a mut [&'a mut Particle] {
     
     let lnlambda = lambda.ln(); 
 
     particles
-        .iter_mut()
+        .par_iter_mut()
         .for_each(|particle| {
         let new_weight = (1. - pd + pd * weight_update_single_particle_part(
             particle, 
@@ -125,19 +127,19 @@ fn weight_update_mut<'a, M>(
 }
 
 
-fn weight_update<'a, M>(
+fn weight_update<'a, M: Sync + Send>(
         particles: &[Particle], 
         measurements: &[M], 
         pd: f64, 
         lambda: f64, 
-        log_likelihood_fn: &dyn Fn(&M, &State) -> f64, 
-        clutter_lnpdf: &dyn Fn(&M) -> f64, 
+        log_likelihood_fn: &(dyn Fn(&M, &State) -> f64 + Send + Sync), 
+        clutter_lnpdf: &(dyn Fn(&M) -> f64 + Send + Sync), 
     ) -> Vec<Particle> {
     
     let lnlambda = lambda.ln(); 
 
     particles
-        .iter()
+        .par_iter()
         .map(|particle| {
         let new_weight = (1. - pd + pd * weight_update_single_particle_part(
             particle, 
@@ -153,13 +155,13 @@ fn weight_update<'a, M>(
 
 }
 
-fn approximate_i2<M>(z: &M, pd: f64, particles_s: Surviving<&[Particle]>, particles_b: Born<&[Particle]>, log_likelihood_fn: &dyn Fn(&M, &State) -> f64) -> f64 {
+fn approximate_i2<M: Send + Sync>(z: &M, pd: f64, particles_s: Surviving<&[Particle]>, particles_b: Born<&[Particle]>, log_likelihood_fn: &(dyn Fn(&M, &State) -> f64 + Send + Sync)) -> f64 {
     let all_particles: &[Particle] = &[particles_s.0, particles_b.0].concat();
     let lnpd = pd.ln(); 
     
-    logsumexp(&all_particles.iter().map(|(lnw, s)| {
+    logsumexp(&all_particles.par_iter().map(|(lnw, s)| {
         lnw + lnpd + log_likelihood_fn(z, s)
-    }).collect_vec())
+    }).collect::<Vec<_>>())
 }
 
 fn existance_update(delta_k: f64, predict_prob:f64) -> f64 {
@@ -172,10 +174,11 @@ pub trait ClutterLnPDF<M> {
 
 impl<MotionS, LogLikelihoodS, Measurement: Clone, ClutterLnPDFS, BirthModelS> BerPFDetections<MotionS, LogLikelihoodS, Measurement, ClutterLnPDFS, BirthModelS> 
 where
-    MotionS: Motion + Clone,
-    LogLikelihoodS: LogLikelihoodRatio<Measurement> + Clone, 
-    ClutterLnPDFS: ClutterLnPDF<Measurement> + Clone,
-    BirthModelS: BirthModel<Vec<Measurement>> + Clone,
+    Measurement: Sync + Send,
+    MotionS: Motion + Clone + Send + Sync,
+    LogLikelihoodS: LogLikelihoodRatio<Measurement> + Clone + Send + Sync, 
+    ClutterLnPDFS: ClutterLnPDF<Measurement> + Clone + Send + Sync,
+    BirthModelS: BirthModel<Vec<Measurement>> + Clone + Send + Sync,
 {
     
     pub fn mean(&self) -> State {
@@ -402,7 +405,7 @@ mod tests {
         
        
         // Worlds most simple likelihood function for testing
-        let log_likelihood_fn: &dyn Fn(&State, &State) -> f64 = & |z, x| {
+        let log_likelihood_fn: &(dyn Fn(&State, &State) -> f64 + Send + Sync) = & |z, x| {
             let r:DVector<f64> = (z - x);
             println!("{}",r);
             r[0]
@@ -424,7 +427,7 @@ mod tests {
         
        
         // Worlds most simple likelihood function for testing
-        let log_likelihood_fn: &dyn Fn(&State, &State) -> f64 = & |z, x| {
+        let log_likelihood_fn: &(dyn Fn(&State, &State) -> f64 + Send + Sync) = & |z, x| {
             let r:DVector<f64> = (z - x);
             println!("{}",r);
             r[0]
@@ -472,7 +475,7 @@ mod tests {
         let measurements = vec![State::from_vec(vec![1.0]), State::from_vec(vec![3.0])];
 
         // Worlds most simple likelihood function for testing
-        let log_likelihood_fn: &dyn Fn(&State, &State) -> f64 = & |z, x| {
+        let log_likelihood_fn: &(dyn Fn(&State, &State)  -> f64+ Send + Sync) = & |z, x| {
             let r:DVector<f64> = (z - x);
             println!("{}",r);
             r[0]

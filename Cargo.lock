@@ -29,6 +29,7 @@ dependencies = [
  "numpy",
  "pyo3",
  "rand",
+ "rayon",
  "statrs",
 ]
 

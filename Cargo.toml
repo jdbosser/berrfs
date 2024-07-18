@@ -18,4 +18,5 @@ nalgebra = "*"
 itertools = "*"
 num-traits = "*"
 rand = "*"
+rayon = "1.10.0"
 
